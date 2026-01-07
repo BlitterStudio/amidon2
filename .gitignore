@@ -53,3 +53,8 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# Build directory
+build/
+.DS_Store
+_UAEFSDB.___
