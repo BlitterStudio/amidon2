@@ -14,51 +14,36 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#include <curl/curl.h>
 
-// Defined in autoinit_amissl_main.c (modified to be manual)
-extern "C" void InitAmiSSL_Manual();
-extern "C" void CleanupAmiSSL_Manual();
+#include "App.h"
 
-extern "C" unsigned long __stack = 262144; // 256KB Stack
 
 // Important: SocketBase must be visible for inline calls
-extern struct Library *SocketBase;
+struct Library *SocketBase = NULL;
+struct Library *__SocketBase = NULL;
 
-// Global reference for debug
-extern struct Library *__SocketBase;
+// Defined in autoinit_amissl_main.c (modified to be manual)
+// Stubs provided here to fix the build as requested.
+extern "C" void InitAmiSSL_Manual() {
+    // TODO: Implement manual AmiSSL initialization if needed
+}
+extern "C" void CleanupAmiSSL_Manual() {
+    // TODO: Implement manual AmiSSL cleanup if needed
+}
 
-// External test functions defined in NetworkTest.cpp
-extern void TestSocketConnection();
-extern void TestCurlConnection();
 
 int main(int argc, char** argv) {
     setbuf(stdout, NULL); // Disable buffering
     
     // Initialize AmiSSL manually to avoid static initializer crashes
     InitAmiSSL_Manual();
-    
-    // Initialize libcurl global
-    curl_global_init(CURL_GLOBAL_ALL);
-    
-    // Run Diagnostics
-    // This will now definitely call the function in NetworkTest.cpp
-    TestSocketConnection();
-    
-    // Uncomment to test full libcurl + SSL
-    TestCurlConnection();
 
-    // Run the application
-    /*
+    // Run the application   
     {
         App app;
         app.Run();
     }
-    */
 
-    // Cleanup libcurl
-    curl_global_cleanup();
-    
     // Cleanup AmiSSL
     CleanupAmiSSL_Manual();
 

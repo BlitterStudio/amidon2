@@ -43,9 +43,10 @@
 #include <utility>
 
 // for isnan/isinf
-#if __cplusplus >= 201103L
+#if 0 // __cplusplus >= 201103L
 #include <cmath>
 #else
+
 extern "C" {
 #ifdef _MSC_VER
 #include <float.h>
@@ -246,11 +247,12 @@ inline value::value(double n) : type_(number_type), u_() {
   if (
 #ifdef _MSC_VER
       !_finite(n)
-#elif __cplusplus >= 201103L
+#elif 0 // __cplusplus >= 201103L
       std::isnan(n) || std::isinf(n)
 #else
       isnan(n) || isinf(n)
 #endif
+
           ) {
     std::abort();
   }

@@ -32,18 +32,19 @@ FetchContent_MakeAvailable(zlib)
 # Source files
 set(SOURCES
     src/main.cpp
-    # src/App.cpp
-    # src/ui/MainWindow.cpp
-    # src/ui/MUIHelpers.cpp
-    # src/ui/WelcomeDialog.cpp
-    # src/ui/SettingsDialog.cpp
-    # src/ui/LoginDialog.cpp
-    # src/MastodonAPI.cpp
-    # src/HttpClient.cpp
+    src/App.cpp
+    src/ui/MainWindow.cpp
+    src/ui/MUIHelpers.cpp
+    src/ui/WelcomeDialog.cpp
+    src/ui/SettingsDialog.cpp
+    src/ui/LoginDialog.cpp
+    src/MastodonAPI.cpp
+    src/HttpClient.cpp
     src/compat.cpp
-    src/NetworkTest.cpp
-    src/OsSocket.c
+    # src/NetworkTest.cpp
+    # src/OsSocket.c
 )
+
 
 # Includes
 include_directories(

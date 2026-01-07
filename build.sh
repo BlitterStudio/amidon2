@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build script for Amidon using the amigadev/crosstools container
 
-IMAGE="amigadev/crosstools:m68k-amigaos-gcc10_arm64"
+IMAGE="amigadev/crosstools:m68k-amigaos"
 WORK_DIR=$(pwd)
 
 echo "Building Amidon using $IMAGE..."
