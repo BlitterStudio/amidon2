@@ -1,6 +1,6 @@
 /*
- * Amidon - a Mastodon client for AmigaOS
- * Copyright (C) 2024 Dimitris Panokostas
+ * Amidon2 - a Mastodon client for AmigaOS
+ * Copyright (C) 2026 Dimitris Panokostas
  */
 
 #include "App.h"
@@ -10,12 +10,15 @@
 #include "ui/LoginDialog.h"
 
 #include "ui/MUIHelpers.h"
+extern "C" {
 #include <proto/exec.h>
 #include <proto/intuition.h>
-
-#include <cstdio>
 #include <proto/muimaster.h>
 #include <clib/alib_protos.h>
+}
+
+#include <cstdio>
+
 #include <vector>
 
 // picojson included via MastodonAPI.h or we can include it directly
@@ -51,34 +54,40 @@ App::App() : m_App(nullptr), m_Running(false) {
      CleanupMUI();
  }
  
- struct Library *SocketBase_App = NULL; // Local var if needed, or just rely on global
- 
- // Declare global SocketBase as extern (managed by autoinit_amissl)
- extern struct Library *SocketBase;
+// Define global SocketBase (managed by autoinit or manually)
+struct Library *SocketBase = NULL;
+struct Library *__SocketBase = NULL;
  
  void App::InitializeMUI() {
      // printf("DEBUG: InitializeMUI start\n");
      
-     // Open bsdsocket.library v4 explicitly
+     // Open bsdsocket.library. Version 4 is Roadshow/AmiTCP. 
+     // We'll try 3 first as it's common for many stacks, or 0 for any.
      if (!SocketBase) {
-          // printf("DEBUG: SocketBase not initialized by autoinit, opening locally...\n");
-          SocketBase = OpenLibrary("bsdsocket.library", 4);
+          SocketBase = OpenLibrary("bsdsocket.library", 3);
           if (!SocketBase) {
-              printf("FATAL: Failed to open bsdsocket.library v4!\n");
+              // Try any version as last resort
+              SocketBase = OpenLibrary("bsdsocket.library", 0);
           }
-     } else {
-          // printf("DEBUG: SocketBase already initialized (Base: %p)\n", SocketBase);
+          
+          if (!SocketBase) {
+              printf("FATAL: Failed to open bsdsocket.library (any version)!\n");
+          } else {
+              m_OwnedSocketBase = true;
+          }
      }
 
-     IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 39);
-     if (!IntuitionBase) printf("FATAL: IntuitionBase failed to open!\n");
-     // else printf("DEBUG: IntuitionBase opened: %p\n", IntuitionBase);
+     // Lower Intuition requirement to 36 (OS 2.0) as it should be enough for basic MUI
+     IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 36);
+     if (!IntuitionBase) {
+         printf("FATAL: intuition.library v36+ failed to open!\n");
+     }
 
+     // MUI requires 19+ (MUI 3.x) or higher for modern features
      MUIMasterBase = OpenLibrary("muimaster.library", 19);
-     if (!MUIMasterBase) printf("FATAL: MUIMasterBase failed to open!\n");
-     // else printf("DEBUG: MUIMasterBase opened: %p\n", MUIMasterBase);
-
-     // printf("DEBUG: App::InitializeMUI completed.\n");
+     if (!MUIMasterBase) {
+         printf("FATAL: muimaster.library v19+ failed to open!\n");
+     }
  }
  
  void App::CleanupMUI() {
@@ -89,6 +98,7 @@ App::App() : m_App(nullptr), m_Running(false) {
      if (MUIMasterBase) CloseLibrary(MUIMasterBase);
      if (IntuitionBase) CloseLibrary((struct Library *)IntuitionBase);
  }
+
  
  bool App::HasSettings() {
      FILE* f = fopen("settings.json", "r");

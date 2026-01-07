@@ -1,6 +1,6 @@
 /*
- * Amidon - a Mastodon client for AmigaOS
- * Copyright (C) 2024 Dimitris Panokostas
+ * Amidon2 - a Mastodon client for AmigaOS
+ * Copyright (C) 2026 Dimitris Panokostas
  */
 
 #include <cstdio>
@@ -10,42 +10,40 @@
 #include <fcntl.h>
 #include <errno.h>
 
-// Use standard headers for clib2 compatibility test
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-
 #include "App.h"
-
-
-// Important: SocketBase must be visible for inline calls
-struct Library *SocketBase = NULL;
-struct Library *__SocketBase = NULL;
-
-// Defined in autoinit_amissl_main.c (modified to be manual)
-// Stubs provided here to fix the build as requested.
-extern "C" void InitAmiSSL_Manual() {
-    // TODO: Implement manual AmiSSL initialization if needed
-}
-extern "C" void CleanupAmiSSL_Manual() {
-    // TODO: Implement manual AmiSSL cleanup if needed
-}
-
 
 int main(int argc, char** argv) {
     setbuf(stdout, NULL); // Disable buffering
     
-    // Initialize AmiSSL manually to avoid static initializer crashes
-    InitAmiSSL_Manual();
+
+    // Verify basic library opening
+    {
+        struct Library* testBase = OpenLibrary("intuition.library", 36);
+        if (testBase) {
+            printf("Main: intuition.library v36+ opened successfully.\n");
+            CloseLibrary(testBase);
+        } else {
+            printf("Main: FATAL ERROR - Cannot open intuition.library v36!\n");
+        }
+    }
 
     // Run the application   
     {
+        printf("Starting Network Test...\n");
+        HttpClient client;
+        client.Get("https://mastodon.social/api/v2/instance", [](const std::string& response, int code) {
+            printf("Network Test Result: Code %d\n", code);
+            if (code == 200) {
+                printf("Response (first 100 chars): %.100s\n", response.c_str());
+            } else {
+                printf("Response: %s\n", response.c_str());
+            }
+        });
+
         App app;
         app.Run();
     }
 
-    // Cleanup AmiSSL
-    CleanupAmiSSL_Manual();
 
     return 0;
 }

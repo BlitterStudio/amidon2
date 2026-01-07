@@ -5,4 +5,4 @@ $WORK_DIR = Get-Location
 
 Write-Host "Building Amidon using $IMAGE..."
 
-docker run --rm -v "${WORK_DIR}:/work" $IMAGE /bin/bash -c "mkdir -p build && cd build && cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/m68k-amigaos.cmake && make"
+docker run --rm -v "${WORK_DIR}:/work" -v "d:\AmigaDev:/amigadev" $IMAGE /bin/bash -c "mkdir -p build && cd build && cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/m68k-amigaos.cmake && make"
