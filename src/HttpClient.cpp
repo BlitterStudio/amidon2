@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <sys/stat.h>
 
 // Implementation that shells out to the 'curl' binary.
 // This is often more reliable on AmigaOS than linking against libcurl.
@@ -13,6 +14,33 @@ namespace {
         int code;
     };
 
+    // Helper function to check if a file exists and is executable
+    bool FileExists(const std::string& path) {
+        struct stat buffer;
+        return (stat(path.c_str(), &buffer) == 0);
+    }
+
+    // Find the curl binary in standard AmigaOS location
+    std::string FindCurlBinary() {
+        static std::string cachedPath;
+        
+        // Return cached path if we've already found it
+        if (!cachedPath.empty()) {
+            return cachedPath;
+        }
+        
+        // Check C: which is the standard AmigaOS command directory
+        std::string amigaOSPath = "C:curl";
+        if (FileExists(amigaOSPath)) {
+            cachedPath = amigaOSPath;
+            printf("Found curl at: %s\n", cachedPath.c_str());
+            return cachedPath;
+        }
+        
+        fprintf(stderr, "WARNING: Could not find curl in C:, using 'curl' and hoping for the best\n");
+        return "curl"; // Fallback
+    }
+
     CurlResult ExecuteCurl(const std::string& args) {
         const char* bodyFile = "T:amidon_curl_body";
         const char* codeFile = "T:amidon_curl_code";
@@ -21,9 +49,12 @@ namespace {
         remove(bodyFile);
         remove(codeFile);
 
+        // Find curl binary in PATH
+        std::string curlPath = FindCurlBinary();
+
         // Build command. We use --silent to avoid progress bar, --location to follow redirects.
         // We use --header to specify JSON content type for API calls.
-        std::string cmd = "curl --silent --location " + args + " --output " + bodyFile + " --write-out \"%{http_code}\" >" + codeFile;
+        std::string cmd = "\"" + curlPath + "\" --silent --location " + args + " --output " + bodyFile + " --write-out \"%{http_code}\" >" + codeFile;
         
         // printf("DEBUG: Executing: %s\n", cmd.c_str());
         int ret = system(cmd.c_str());
