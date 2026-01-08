@@ -9,7 +9,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mcrt=clib2")
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -mcrt=clib2")
 
 # Ensure feature checks can find libraries
-set(CMAKE_REQUIRED_LIBRARIES "-lnet -lauto")
+set(CMAKE_REQUIRED_LIBRARIES "-lauto")
 
 # Source files
 set(SOURCES
@@ -47,7 +47,6 @@ set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}")
 target_link_libraries(amidon PRIVATE
     -lmui
     -latomic
-    -lnet
 )
 
 # Copy assets to build directory
