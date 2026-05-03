@@ -8,6 +8,7 @@ struct Status {
     std::string content;
     std::string author_username;
     std::string author_displayname;
+    std::string author_avatar;
     bool favourited = false;
     bool reblogged = false;
 };
@@ -37,6 +38,11 @@ struct Notification {
     std::string author_displayname;
     std::string author_avatar;        // URL to author's avatar image
     std::string status_excerpt;       // empty when there's no associated status
+};
+
+struct MastodonList {
+    std::string id;
+    std::string title;
 };
 
 #endif // LOGIC_MASTODON_TYPES_H

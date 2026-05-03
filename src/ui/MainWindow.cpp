@@ -10,6 +10,8 @@
 #include <mui/Guigfx_mcc.h>
 #include <proto/intuition.h>
 #include <proto/exec.h>
+#include <proto/dos.h>
+#include <sys/stat.h>
 #include "../Constants.h"
 #include "HTMLview_mcc.h"
 #include "htmlview_nethook.h"
@@ -38,17 +40,62 @@ MainWindow::MainWindow(MastodonAPI& api)
       m_ListFavourites(nullptr), m_ListFavouritesInner(nullptr), m_HtmlviewFavourites(nullptr),
       m_BtnRefreshBookmarks(nullptr),
       m_ListBookmarks(nullptr), m_ListBookmarksInner(nullptr), m_HtmlviewBookmarks(nullptr),
+      m_BtnRefreshExplore(nullptr),
+      m_ListExplore(nullptr), m_ListExploreInner(nullptr), m_HtmlviewExplore(nullptr),
+      m_BtnRefreshDMs(nullptr),
+      m_ListDMs(nullptr), m_ListDMsInner(nullptr), m_HtmlviewDMs(nullptr),
+      m_BtnRefreshLists(nullptr),
+      m_ListLists(nullptr), m_ListListsInner(nullptr), m_HtmlviewLists(nullptr),
+      m_BtnRefreshRequests(nullptr),
+      m_ListRequests(nullptr), m_ListRequestsInner(nullptr), m_HtmlviewRequests(nullptr),
       m_LabelProfileDisplay(nullptr), m_LabelProfileAcct(nullptr),
       m_LabelProfileStats(nullptr), m_HtmlviewProfileBio(nullptr),
       m_LabelUsername(nullptr), m_LabelInstance(nullptr),
       m_ImageAvatar(nullptr), m_HeaderGroup(nullptr),
       m_TextEditor(nullptr), m_LabelCharCount(nullptr),
       m_CycleVisibility(nullptr), m_CheckCW(nullptr), m_StringCW(nullptr), m_BtnPost(nullptr),
-      m_Htmlview(nullptr), m_HtmlviewNotifications(nullptr), m_NetHook({}),
+      m_Htmlview(nullptr), m_HtmlviewNotifications(nullptr), m_NetHook({}), m_LinkHook({}),
       m_ItemQuit(nullptr), m_ItemSettings(nullptr), m_ItemMUI(nullptr),
       m_API(api), m_App(nullptr), m_UseGuigfx(false)  // set in CreateHeader
 {
     HTMLviewNet_InitHook(&m_NetHook);
+
+    // Click hook: target of each MUIM_Notify (MUIA_HTMLview_ClickedURL) is
+    // the HTMLview itself, so the hook's `obj` parameter is the HTMLview
+    // we should query MUIA_HTMLview_LinkClass on. h_Entry is the
+    // amiga.lib HookEntry trampoline (m68k passes args in registers); on
+    // OS4 the hook is called with stack args directly.
+    typedef ULONG (*HookEntryFn)();
+#if defined(__amigaos4__)
+    m_LinkHook.h_Entry    = (HookEntryFn)LinkClickHookFn;
+    m_LinkHook.h_SubEntry = NULL;
+#else
+    m_LinkHook.h_Entry    = (HookEntryFn)HookEntry;
+    m_LinkHook.h_SubEntry = (HookEntryFn)LinkClickHookFn;
+#endif
+    m_LinkHook.h_Data = this;
+}
+
+// Static dispatcher for MUIA_HTMLview_ClickedURL notifications. obj is the
+// HTMLview that fired (we set the notify target to the HTMLview itself).
+ULONG MainWindow::LinkClickHookFn(struct Hook* hook, Object* htmlview, APTR msg) {
+    MainWindow* self = static_cast<MainWindow*>(hook->h_Data);
+    if (!self || !htmlview) return 0;
+
+    STRPTR url = NULL;
+    GetAttr(MUIA_HTMLview_ClickedURL, htmlview, (ULONG*)&url);
+    STRPTR cls = NULL;
+    GetAttr(MUIA_HTMLview_LinkClass, htmlview, (ULONG*)&cls);
+
+    fprintf(stderr, "DEBUG: link clicked url=\"%s\" class=\"%s\"\n",
+            url ? (const char*)url : "(null)",
+            cls ? (const char*)cls : "(none)");
+
+    // TODO: route on cls — "mention" -> open profile,
+    // "hashtag" -> open hashtag timeline, otherwise open URL externally.
+    // For now we just log so we can see the contract works.
+    (void)msg;
+    return 0;
 }
 
 Object* MainWindow::CreateHeader() {
@@ -601,12 +648,11 @@ void MainWindow::ShowNotification(int index) {
 
     // Heap-allocated and intentionally never freed: avoids running a
     // std::string destructor during C++ global teardown.
-    //
-    // NOTE: avatar URL is stored on the Notification but not embedded here
-    // because HTMLview.mcc doesn't scale <img width/height> — full-size
-    // avatars overwhelm the pane. Re-introduce when we have proper scaling.
     static std::string* s_html = new std::string;
     *s_html = "<html><body>";
+    if (!n.author_avatar.empty()) {
+        *s_html += "<img src=\"" + n.author_avatar + "\" width=\"48\" height=\"48\"> ";
+    }
     *s_html += "<b>" + display + "</b> <i>@" + n.author_username + "</i><br>";
     *s_html += verb;
     if (!n.status_excerpt.empty()) {
@@ -650,22 +696,6 @@ void MainWindow::FetchNotifications() {
                      (IPTR)m_NotificationStrings.back().c_str(), MUIV_List_Insert_Bottom);
         }
     });
-}
-
-Object* MainWindow::CreateExplorePage() {
-    return MUIHelpers_NewObject(MUIC_Group,
-        MUIA_Group_Horiz, FALSE,
-        MUIA_Group_Child, (IPTR)MUIHelpers_NewObject(MUIC_Text, MUIA_Text_Contents, (IPTR)"DUMMY EXPLORE", TAG_DONE),
-        MUIA_Group_Child, (IPTR)MUIHelpers_NewObject(MUIC_Rectangle, TAG_DONE),
-        TAG_DONE);
-}
-
-Object* MainWindow::CreateDMSPage() {
-    return MUIHelpers_NewObject(MUIC_Group,
-        MUIA_Group_Horiz, FALSE,
-        MUIA_Group_Child, (IPTR)MUIHelpers_NewObject(MUIC_Text, MUIA_Text_Contents, (IPTR)"DUMMY DMs", TAG_DONE),
-        MUIA_Group_Child, (IPTR)MUIHelpers_NewObject(MUIC_Rectangle, TAG_DONE),
-        TAG_DONE);
 }
 
 namespace {
@@ -738,6 +768,48 @@ void RenderStatusToHtmlview(Object* htmlview, std::string* sink, const Status& s
 
 }  // namespace
 
+Object* MainWindow::CreateDMSPage() {
+    return BuildStatusListPage("\33cRefresh DMs",
+                                &m_NetHook,
+                                m_BtnRefreshDMs,
+                                m_ListDMsInner,
+                                m_ListDMs,
+                                m_HtmlviewDMs);
+}
+
+void MainWindow::FetchDMs() {
+    m_API.GetConversations([this](std::vector<Status> data) {
+        PopulateStatusList(m_ListDMsInner, data, m_DMsStrings, m_DMsData);
+    });
+}
+
+void MainWindow::ShowDM(int index) {
+    if (index < 0 || index >= (int)m_DMsData.size()) return;
+    static std::string* s_html = new std::string;
+    RenderStatusToHtmlview(m_HtmlviewDMs, s_html, m_DMsData[index]);
+}
+
+Object* MainWindow::CreateExplorePage() {
+    return BuildStatusListPage("\33cRefresh Trending",
+                                &m_NetHook,
+                                m_BtnRefreshExplore,
+                                m_ListExploreInner,
+                                m_ListExplore,
+                                m_HtmlviewExplore);
+}
+
+void MainWindow::FetchExplore() {
+    m_API.GetTrendingStatuses([this](std::vector<Status> data) {
+        PopulateStatusList(m_ListExploreInner, data, m_ExploreStrings, m_ExploreData);
+    });
+}
+
+void MainWindow::ShowExploreItem(int index) {
+    if (index < 0 || index >= (int)m_ExploreData.size()) return;
+    static std::string* s_html = new std::string;
+    RenderStatusToHtmlview(m_HtmlviewExplore, s_html, m_ExploreData[index]);
+}
+
 Object* MainWindow::CreateFavouritesPage() {
     return BuildStatusListPage("\33cRefresh Favourites",
                                 &m_NetHook,
@@ -780,20 +852,126 @@ void MainWindow::ShowBookmark(int index) {
     RenderStatusToHtmlview(m_HtmlviewBookmarks, s_html, m_BookmarksData[index]);
 }
 
+// Lists / Requests pages use plain Text widgets in the detail pane
+// rather than full HTMLview instances. Each extra HTMLview the new
+// HTMLview.mcc creates appears to consume AmiSSL/entropy state at
+// MUI setup time; once we cross some threshold of HTMLview instances
+// at startup, the first SSL_CTX_new in our HttpRequest fails. Pages
+// that don't need rich rendering avoid that by sticking to MUIC_Text.
 Object* MainWindow::CreateListsPage() {
+    m_ListListsInner = MUIHelpers_NewObject(MUIC_List, TAG_DONE);
+    if (!m_ListListsInner) return nullptr;
+
+    // m_HtmlviewLists is now a Text widget (variable name kept for
+    // member-table consistency). ShowList writes to it via Text_Contents.
+    m_HtmlviewLists = MUIHelpers_NewObject(MUIC_Text,
+        MUIA_Text_Contents, (IPTR)"",
+        MUIA_Frame, MUIV_Frame_Text,
+        TAG_DONE);
+
     return MUIHelpers_NewObject(MUIC_Group,
         MUIA_Group_Horiz, FALSE,
-        MUIA_Group_Child, (IPTR)MUIHelpers_NewObject(MUIC_Text, MUIA_Text_Contents, (IPTR)"DUMMY LISTS", TAG_DONE),
-        MUIA_Group_Child, (IPTR)MUIHelpers_NewObject(MUIC_Rectangle, TAG_DONE),
+        MUIA_Group_Child, (IPTR)(m_BtnRefreshLists = (Object*)MUIHelpers_NewObject(MUIC_Text,
+            MUIA_Frame, MUIV_Frame_Button,
+            MUIA_Background, MUII_ButtonBack,
+            MUIA_InputMode, MUIV_InputMode_RelVerify,
+            MUIA_Text_Contents, (IPTR)"\33cRefresh Lists",
+            TAG_DONE)),
+        MUIA_Group_Child, (IPTR)(m_ListLists = MUIHelpers_NewObject(MUIC_Listview,
+            MUIA_Weight, 50,
+            MUIA_Listview_List, (IPTR)m_ListListsInner,
+            TAG_DONE)),
+        MUIA_Group_Child, (IPTR)m_HtmlviewLists,
         TAG_DONE);
 }
 
+void MainWindow::FetchLists() {
+    m_API.GetLists([this](std::vector<MastodonList> data) {
+        if (!m_ListListsInner) return;
+        DoMethod(m_ListListsInner, MUIM_List_Clear);
+        m_ListsData = data;
+        m_ListsStrings.clear();
+        for (const auto& l : data) {
+            m_ListsStrings.push_back(l.title);
+            DoMethod(m_ListListsInner, MUIM_List_InsertSingle,
+                     (IPTR)m_ListsStrings.back().c_str(), MUIV_List_Insert_Bottom);
+        }
+    });
+}
+
+void MainWindow::ShowList(int index) {
+    if (index < 0 || index >= (int)m_ListsData.size()) return;
+    if (!m_HtmlviewLists) return;
+    const MastodonList& l = m_ListsData[index];
+    static std::string* s_text = new std::string;
+    *s_text = "\33bList:\33n " + l.title + "\nid: " + l.id +
+              "\n\n(list timeline rendering: TODO)";
+    SetAttrs(m_HtmlviewLists, MUIA_Text_Contents, (IPTR)s_text->c_str(), TAG_DONE);
+}
+
 Object* MainWindow::CreateRequestsPage() {
+    m_ListRequestsInner = MUIHelpers_NewObject(MUIC_List, TAG_DONE);
+    if (!m_ListRequestsInner) return nullptr;
+
+    m_HtmlviewRequests = MUIHelpers_NewObject(MUIC_Text,
+        MUIA_Text_Contents, (IPTR)"",
+        MUIA_Frame, MUIV_Frame_Text,
+        TAG_DONE);
+
     return MUIHelpers_NewObject(MUIC_Group,
         MUIA_Group_Horiz, FALSE,
-        MUIA_Group_Child, (IPTR)MUIHelpers_NewObject(MUIC_Text, MUIA_Text_Contents, (IPTR)"DUMMY REQUESTS", TAG_DONE),
-        MUIA_Group_Child, (IPTR)MUIHelpers_NewObject(MUIC_Rectangle, TAG_DONE),
+        MUIA_Group_Child, (IPTR)(m_BtnRefreshRequests = (Object*)MUIHelpers_NewObject(MUIC_Text,
+            MUIA_Frame, MUIV_Frame_Button,
+            MUIA_Background, MUII_ButtonBack,
+            MUIA_InputMode, MUIV_InputMode_RelVerify,
+            MUIA_Text_Contents, (IPTR)"\33cRefresh Requests",
+            TAG_DONE)),
+        MUIA_Group_Child, (IPTR)(m_ListRequests = MUIHelpers_NewObject(MUIC_Listview,
+            MUIA_Weight, 50,
+            MUIA_Listview_List, (IPTR)m_ListRequestsInner,
+            TAG_DONE)),
+        MUIA_Group_Child, (IPTR)m_HtmlviewRequests,
         TAG_DONE);
+}
+
+void MainWindow::FetchRequests() {
+    m_API.GetFollowRequests([this](std::vector<Account> data) {
+        if (!m_ListRequestsInner) return;
+        DoMethod(m_ListRequestsInner, MUIM_List_Clear);
+        m_RequestsData = data;
+        m_RequestsStrings.clear();
+        for (const auto& a : data) {
+            std::string display = a.display_name.empty() ? a.username : a.display_name;
+            m_RequestsStrings.push_back(display + " (@" + a.acct + ")");
+            DoMethod(m_ListRequestsInner, MUIM_List_InsertSingle,
+                     (IPTR)m_RequestsStrings.back().c_str(), MUIV_List_Insert_Bottom);
+        }
+    });
+}
+
+void MainWindow::ShowRequest(int index) {
+    if (index < 0 || index >= (int)m_RequestsData.size()) return;
+    if (!m_HtmlviewRequests) return;
+    const Account& a = m_RequestsData[index];
+    std::string display = a.display_name.empty() ? a.username : a.display_name;
+    static std::string* s_text = new std::string;
+    *s_text = "\33b" + display + "\33n  @" + a.acct +
+              "\n\nwants to follow you";
+    if (!a.note.empty()) {
+        *s_text += "\n\n";
+        // Note is HTML; strip simple tags for plain text display. Lossy
+        // but readable; rich rendering can come later if HTMLview limits
+        // are sorted out.
+        std::string stripped;
+        bool inTag = false;
+        for (char c : a.note) {
+            if (c == '<') inTag = true;
+            else if (c == '>') inTag = false;
+            else if (!inTag) stripped += c;
+        }
+        *s_text += stripped;
+    }
+    SetAttrs(m_HtmlviewRequests, MUIA_Text_Contents, (IPTR)s_text->c_str(), TAG_DONE);
 }
 
 Object* MainWindow::CreateProfilePage() {
@@ -1003,22 +1181,92 @@ void MainWindow::InitNotifications(Object* app) {
         DoMethod(m_BtnBoostToot, MUIM_Notify, MUIA_Pressed, FALSE,
             app, 2, MUIM_Application_ReturnID, APPRETURN_BOOST_TOOT);
     }
+
+    if (m_BtnRefreshExplore) {
+        DoMethod(m_BtnRefreshExplore, MUIM_Notify, MUIA_Pressed, FALSE,
+            app, 2, MUIM_Application_ReturnID, APPRETURN_REFRESH_EXPLORE);
+    }
+    if (m_ListExploreInner) {
+        DoMethod(m_ListExploreInner, MUIM_Notify, MUIA_List_Active, MUIV_EveryTime,
+            app, 2, MUIM_Application_ReturnID, APPRETURN_EXPLORE_SELECT);
+    }
+
+    if (m_BtnRefreshDMs) {
+        DoMethod(m_BtnRefreshDMs, MUIM_Notify, MUIA_Pressed, FALSE,
+            app, 2, MUIM_Application_ReturnID, APPRETURN_REFRESH_DMS);
+    }
+    if (m_ListDMsInner) {
+        DoMethod(m_ListDMsInner, MUIM_Notify, MUIA_List_Active, MUIV_EveryTime,
+            app, 2, MUIM_Application_ReturnID, APPRETURN_DMS_SELECT);
+    }
+
+    if (m_BtnRefreshLists) {
+        DoMethod(m_BtnRefreshLists, MUIM_Notify, MUIA_Pressed, FALSE,
+            app, 2, MUIM_Application_ReturnID, APPRETURN_REFRESH_LISTS);
+    }
+    if (m_ListListsInner) {
+        DoMethod(m_ListListsInner, MUIM_Notify, MUIA_List_Active, MUIV_EveryTime,
+            app, 2, MUIM_Application_ReturnID, APPRETURN_LISTS_SELECT);
+    }
+
+    if (m_BtnRefreshRequests) {
+        DoMethod(m_BtnRefreshRequests, MUIM_Notify, MUIA_Pressed, FALSE,
+            app, 2, MUIM_Application_ReturnID, APPRETURN_REFRESH_REQUESTS);
+    }
+    if (m_ListRequestsInner) {
+        DoMethod(m_ListRequestsInner, MUIM_Notify, MUIA_List_Active, MUIV_EveryTime,
+            app, 2, MUIM_Application_ReturnID, APPRETURN_REQUESTS_SELECT);
+    }
+
+    // Wire link-click handler on every HTMLview pane. Target is the
+    // HTMLview itself so the hook's `obj` is the HTMLview to query
+    // MUIA_HTMLview_LinkClass on.
+    Object* htmlviews[] = {
+        m_Htmlview, m_HtmlviewNotifications, m_HtmlviewFavourites,
+        m_HtmlviewBookmarks, m_HtmlviewExplore, m_HtmlviewDMs,
+        m_HtmlviewLists, m_HtmlviewRequests, m_HtmlviewProfileBio
+    };
+    for (Object* h : htmlviews) {
+        if (!h) continue;
+        DoMethod(h, MUIM_Notify, MUIA_HTMLview_ClickedURL, MUIV_EveryTime,
+            h, 3, MUIM_CallHook, (IPTR)&m_LinkHook, MUIV_TriggerValue);
+    }
 }
 
 Object* MainWindow::Create() {
-    static const char* titles[] = { 
-        "Publish", 
-        "Notifications", 
+    static const char* titles[] = {
+        "Publish",
+        "Notifications",
         "Explore",
-        "Timeline", 
+        "Timeline",
         "DMs",
         "Favourites",
         "Bookmarks",
         "Lists",
         "Requests",
         "Profile",
-        NULL 
+        NULL
     };
+
+    // Enable HTMLview's on-disk image/response cache so avatars and other
+    // <img> URLs persist across runs. The hook does not create the dir,
+    // so we ensure it exists first.
+    {
+        const char* cacheDir = "cache/htmlview";
+        struct stat st;
+        if (stat("cache", &st) != 0) {
+            BPTR lock = CreateDir((STRPTR)"cache");
+            if (lock) UnLock(lock);
+        }
+        if (stat(cacheDir, &st) != 0) {
+            BPTR lock = CreateDir((STRPTR)cacheDir);
+            if (lock) UnLock(lock);
+        }
+        HTMLviewNet_SetCacheDir(cacheDir);
+        HTMLviewNet_SetCacheTTL(7 * 86400);  // 7 days for avatars/static assets
+        fprintf(stderr, "DEBUG: HTMLview cache dir=%s ttl=%lus\n",
+                cacheDir, (unsigned long)(7 * 86400));
+    }
 
     Object* menu = CreateMenu();
 

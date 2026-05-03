@@ -194,6 +194,125 @@ void MastodonAPI::GetBookmarks(std::function<void(std::vector<Status>)> callback
                       "GetBookmarks", callback);
 }
 
+void MastodonAPI::GetLists(std::function<void(std::vector<MastodonList>)> callback) {
+    if (m_InstanceURL.empty() || m_AccessToken.empty()) {
+        if (callback) callback({});
+        return;
+    }
+
+    std::string url = UrlBuilder::Lists(m_InstanceURL);
+    std::string authHeader = UrlBuilder::AuthHeader(m_AccessToken);
+
+    auto handler = [callback](const std::string& response, long code) {
+        std::vector<MastodonList> out;
+        if (code != 200) {
+            fprintf(stderr, "GetLists failed code=%ld body=%.200s\n",
+                    code, response.c_str());
+            if (callback) callback(out);
+            return;
+        }
+        json_object* root = json_tokener_parse(response.c_str());
+        if (!root || !json_object_is_type(root, json_type_array)) {
+            fprintf(stderr, "GetLists: response is not a JSON array\n");
+            if (root) json_object_put(root);
+            if (callback) callback(out);
+            return;
+        }
+        int len = json_object_array_length(root);
+        for (int i = 0; i < len; i++) {
+            json_object* item = json_object_array_get_idx(root, i);
+            if (!json_object_is_type(item, json_type_object)) continue;
+            MastodonList l;
+            json_object* val = NULL;
+            if (json_object_object_get_ex(item, "id", &val) && json_object_is_type(val, json_type_string))
+                l.id = json_object_get_string(val);
+            if (json_object_object_get_ex(item, "title", &val) && json_object_is_type(val, json_type_string))
+                l.title = json_object_get_string(val);
+            out.push_back(l);
+        }
+        json_object_put(root);
+        if (callback) callback(out);
+    };
+
+    if (!m_AsyncHttp) {
+        fprintf(stderr, "GetLists: AsyncHttp service unavailable\n");
+        if (callback) callback({});
+        return;
+    }
+    m_AsyncHttp->Get(url, authHeader, handler);
+}
+
+void MastodonAPI::GetFollowRequests(std::function<void(std::vector<Account>)> callback) {
+    if (m_InstanceURL.empty() || m_AccessToken.empty()) {
+        if (callback) callback({});
+        return;
+    }
+
+    std::string url = UrlBuilder::FollowRequests(m_InstanceURL);
+    std::string authHeader = UrlBuilder::AuthHeader(m_AccessToken);
+
+    auto handler = [callback](const std::string& response, long code) {
+        if (code != 200) {
+            fprintf(stderr, "GetFollowRequests failed code=%ld body=%.200s\n",
+                    code, response.c_str());
+            if (callback) callback({});
+            return;
+        }
+        if (callback) callback(AccountParser::ParseAccountArray(response));
+    };
+
+    if (!m_AsyncHttp) {
+        fprintf(stderr, "GetFollowRequests: AsyncHttp service unavailable\n");
+        if (callback) callback({});
+        return;
+    }
+    m_AsyncHttp->Get(url, authHeader, handler);
+}
+
+void MastodonAPI::GetConversations(std::function<void(std::vector<Status>)> callback) {
+    if (m_InstanceURL.empty() || m_AccessToken.empty()) {
+        if (callback) callback({});
+        return;
+    }
+
+    std::string url = UrlBuilder::Conversations(m_InstanceURL);
+    std::string authHeader = UrlBuilder::AuthHeader(m_AccessToken);
+
+    auto handler = [callback](const std::string& response, long code) {
+        if (code != 200) {
+            fprintf(stderr, "GetConversations failed code=%ld body=%.200s\n",
+                    code, response.c_str());
+            if (callback) callback({});
+            return;
+        }
+        if (callback) callback(TimelineParser::ParseConversations(response));
+    };
+
+    if (!m_AsyncHttp) {
+        fprintf(stderr, "GetConversations: AsyncHttp service unavailable\n");
+        if (callback) callback({});
+        return;
+    }
+    m_AsyncHttp->Get(url, authHeader, handler);
+}
+
+void MastodonAPI::GetTrendingStatuses(std::function<void(std::vector<Status>)> callback) {
+    if (m_InstanceURL.empty()) {
+        if (callback) callback({});
+        return;
+    }
+    // /trends/statuses works without auth on most instances, but some
+    // (mastodon.social etc.) restrict it; pass the bearer token if we have
+    // one.
+    std::string authHeader = m_AccessToken.empty()
+                              ? std::string()
+                              : UrlBuilder::AuthHeader(m_AccessToken);
+    RunStatusListGet(m_AsyncHttp,
+                      UrlBuilder::TrendingStatuses(m_InstanceURL),
+                      authHeader,
+                      "GetTrendingStatuses", callback);
+}
+
 namespace {
 
 void RunStatusActionPost(AsyncHttpService* asyncHttp, const std::string& url,

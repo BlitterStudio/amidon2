@@ -29,6 +29,10 @@ public:
     void GetPublicTimeline(std::function<void(std::vector<Status>)> callback);
     void GetFavourites(std::function<void(std::vector<Status>)> callback);
     void GetBookmarks(std::function<void(std::vector<Status>)> callback);
+    void GetTrendingStatuses(std::function<void(std::vector<Status>)> callback);
+    void GetConversations(std::function<void(std::vector<Status>)> callback);
+    void GetLists(std::function<void(std::vector<MastodonList>)> callback);
+    void GetFollowRequests(std::function<void(std::vector<Account>)> callback);
     void GetNotifications(std::function<void(std::vector<Notification>)> callback);
 
     void PostStatus(const std::string& content, const std::string& visibility, const std::string& spoilerText, std::function<void(bool success, const std::string& statusId)> callback);

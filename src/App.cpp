@@ -337,14 +337,26 @@ void App::Run() {
                     // 0 Publish, 1 Notifications, 2 Explore, 3 Timeline, ...
                     if (active == 1 && m_API && m_API->HasCredentials()) {
                         m_MainWindow->FetchNotifications();
+                    } else if (active == 2) {
+                        // Explore — trending, no auth required
+                        m_MainWindow->FetchExplore();
                     } else if (active == 3) {
                         m_MainWindow->FetchTimeline();
+                    } else if (active == 4 && m_API && m_API->HasCredentials()) {
+                        // DMs
+                        m_MainWindow->FetchDMs();
                     } else if (active == 5 && m_API && m_API->HasCredentials()) {
                         // Favourites
                         m_MainWindow->FetchFavourites();
                     } else if (active == 6 && m_API && m_API->HasCredentials()) {
                         // Bookmarks
                         m_MainWindow->FetchBookmarks();
+                    } else if (active == 7 && m_API && m_API->HasCredentials()) {
+                        // Lists
+                        m_MainWindow->FetchLists();
+                    } else if (active == 8 && m_API && m_API->HasCredentials()) {
+                        // Requests
+                        m_MainWindow->FetchRequests();
                     }
                 }
                 break;
@@ -391,6 +403,54 @@ void App::Run() {
             case APPRETURN_BOOST_TOOT:
                 if (m_MainWindow) m_MainWindow->HandleBoostToot();
                 break;
+            case APPRETURN_REFRESH_EXPLORE:
+                if (m_MainWindow) m_MainWindow->FetchExplore();
+                break;
+            case APPRETURN_EXPLORE_SELECT: {
+                if (!m_MainWindow || !m_MainWindow->m_ListExploreInner) break;
+                LONG active = MUIV_List_Active_Off;
+                GetAttr(MUIA_List_Active, m_MainWindow->m_ListExploreInner, (IPTR*)&active);
+                if (active != MUIV_List_Active_Off) {
+                    m_MainWindow->ShowExploreItem((int)active);
+                }
+                break;
+            }
+            case APPRETURN_REFRESH_DMS:
+                if (m_MainWindow) m_MainWindow->FetchDMs();
+                break;
+            case APPRETURN_DMS_SELECT: {
+                if (!m_MainWindow || !m_MainWindow->m_ListDMsInner) break;
+                LONG active = MUIV_List_Active_Off;
+                GetAttr(MUIA_List_Active, m_MainWindow->m_ListDMsInner, (IPTR*)&active);
+                if (active != MUIV_List_Active_Off) {
+                    m_MainWindow->ShowDM((int)active);
+                }
+                break;
+            }
+            case APPRETURN_REFRESH_LISTS:
+                if (m_MainWindow) m_MainWindow->FetchLists();
+                break;
+            case APPRETURN_LISTS_SELECT: {
+                if (!m_MainWindow || !m_MainWindow->m_ListListsInner) break;
+                LONG active = MUIV_List_Active_Off;
+                GetAttr(MUIA_List_Active, m_MainWindow->m_ListListsInner, (IPTR*)&active);
+                if (active != MUIV_List_Active_Off) {
+                    m_MainWindow->ShowList((int)active);
+                }
+                break;
+            }
+            case APPRETURN_REFRESH_REQUESTS:
+                if (m_MainWindow) m_MainWindow->FetchRequests();
+                break;
+            case APPRETURN_REQUESTS_SELECT: {
+                if (!m_MainWindow || !m_MainWindow->m_ListRequestsInner) break;
+                LONG active = MUIV_List_Active_Off;
+                GetAttr(MUIA_List_Active, m_MainWindow->m_ListRequestsInner, (IPTR*)&active);
+                if (active != MUIV_List_Active_Off) {
+                    m_MainWindow->ShowRequest((int)active);
+                }
+                break;
+            }
             case APPRETURN_SAVE_SETTINGS:
                 {
                     std::string instance;

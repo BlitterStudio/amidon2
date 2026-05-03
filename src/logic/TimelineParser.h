@@ -12,6 +12,9 @@ namespace TimelineParser {
 Status ParseStatus(json_object* item);
 std::vector<Status> ParseTimeline(const std::string& json);
 
+// Extracts each conversation's `last_status` from /api/v1/conversations.
+std::vector<Status> ParseConversations(const std::string& json);
+
 }
 
 #endif // LOGIC_TIMELINE_PARSER_H

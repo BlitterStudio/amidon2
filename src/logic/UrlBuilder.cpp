@@ -22,6 +22,22 @@ std::string Bookmarks(const std::string& instance) {
     return "https://" + instance + "/api/v1/bookmarks";
 }
 
+std::string TrendingStatuses(const std::string& instance) {
+    return "https://" + instance + "/api/v1/trends/statuses";
+}
+
+std::string Conversations(const std::string& instance) {
+    return "https://" + instance + "/api/v1/conversations";
+}
+
+std::string Lists(const std::string& instance) {
+    return "https://" + instance + "/api/v1/lists";
+}
+
+std::string FollowRequests(const std::string& instance) {
+    return "https://" + instance + "/api/v1/follow_requests";
+}
+
 std::string FavouriteStatus(const std::string& instance, const std::string& statusId) {
     return "https://" + instance + "/api/v1/statuses/" + statusId + "/favourite";
 }
