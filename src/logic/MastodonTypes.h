@@ -8,6 +8,8 @@ struct Status {
     std::string content;
     std::string author_username;
     std::string author_displayname;
+    bool favourited = false;
+    bool reblogged = false;
 };
 
 struct AppRegistration {
@@ -26,6 +28,15 @@ struct Account {
     int followers_count;
     int following_count;
     int statuses_count;
+};
+
+struct Notification {
+    std::string id;
+    std::string type;                 // "follow", "favourite", "reblog", "mention", etc.
+    std::string author_username;
+    std::string author_displayname;
+    std::string author_avatar;        // URL to author's avatar image
+    std::string status_excerpt;       // empty when there's no associated status
 };
 
 #endif // LOGIC_MASTODON_TYPES_H

@@ -65,6 +65,7 @@ set(SOURCES
     # Logic (platform-free)
     src/logic/TimelineParser.cpp
     src/logic/AccountParser.cpp
+    src/logic/NotificationParser.cpp
     src/logic/SettingsParser.cpp
     src/logic/TootFormatter.cpp
     src/logic/UrlBuilder.cpp

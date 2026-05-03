@@ -19,13 +19,24 @@ class MastodonAPI;
 
 class MainWindow {
 public:
-    MainWindow(MastodonAPI& api, bool useGuigfx = false);
+    MainWindow(MastodonAPI& api);
     Object* Create();
     void FetchTimeline();
+    void FetchNotifications();
+    void FetchFavourites();
+    void FetchBookmarks();
     void HandlePost();
     void SetAccountInfo(const std::string& username, const std::string& instance, const std::string& avatarPath);
     void UpdateCharacterCounter();
     void ShowToot(int index);
+    void ShowNotification(int index);
+    void ShowFavourite(int index);
+    void ShowBookmark(int index);
+
+    // Toot interactions on the currently-selected Timeline entry.
+    void HandleFavouriteToot();
+    void HandleBoostToot();
+    void SetProfile(const Account& account);
     void InitNotifications(Object* app);
     Object* GetMUIObject() { return m_Window; }
 
@@ -33,13 +44,35 @@ public:
     Object* m_ListTimeline;
     Object* m_ListTimelineInner;
     Object* m_ListNavigation;
+    Object* m_ListNavigationInner;
     Object* m_PageGroup;
 
     Object* m_BtnRefreshTimeline;
+    Object* m_BtnFavouriteToot;
+    Object* m_BtnBoostToot;
+    Object* m_BtnRefreshNotifications;
+    Object* m_ListNotifications;
+    Object* m_ListNotificationsInner;
+
+    Object* m_BtnRefreshFavourites;
+    Object* m_ListFavourites;
+    Object* m_ListFavouritesInner;
+    Object* m_HtmlviewFavourites;
+
+    Object* m_BtnRefreshBookmarks;
+    Object* m_ListBookmarks;
+    Object* m_ListBookmarksInner;
+    Object* m_HtmlviewBookmarks;
+
+    Object* m_LabelProfileDisplay;
+    Object* m_LabelProfileAcct;
+    Object* m_LabelProfileStats;
+    Object* m_HtmlviewProfileBio;
 
     Object* m_LabelUsername;
     Object* m_LabelInstance;
     Object* m_ImageAvatar;
+    Object* m_HeaderGroup;
 
     Object* m_TextEditor;
     Object* m_LabelCharCount;
@@ -49,6 +82,7 @@ public:
     Object* m_BtnPost;
 
     Object* m_Htmlview;
+    Object* m_HtmlviewNotifications;
     struct Hook m_NetHook;
 
     Object* m_ItemQuit;
@@ -58,6 +92,15 @@ public:
     // Data Management
     std::list<std::string> m_TimelineStrings;
     std::vector<Status> m_TimelineData;
+
+    std::list<std::string> m_NotificationStrings;
+    std::vector<Notification> m_NotificationData;
+
+    std::list<std::string> m_FavouritesStrings;
+    std::vector<Status> m_FavouritesData;
+
+    std::list<std::string> m_BookmarksStrings;
+    std::vector<Status> m_BookmarksData;
 
     struct Hook m_TextEditorHook;
 

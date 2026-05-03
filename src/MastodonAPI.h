@@ -27,11 +27,20 @@ public:
 
     void GetHomeTimeline(std::function<void(std::vector<Status>)> callback);
     void GetPublicTimeline(std::function<void(std::vector<Status>)> callback);
-    void GetNotifications(std::function<void(std::vector<std::string>)> callback);
+    void GetFavourites(std::function<void(std::vector<Status>)> callback);
+    void GetBookmarks(std::function<void(std::vector<Status>)> callback);
+    void GetNotifications(std::function<void(std::vector<Notification>)> callback);
 
     void PostStatus(const std::string& content, const std::string& visibility, const std::string& spoilerText, std::function<void(bool success, const std::string& statusId)> callback);
 
     void GetAccountInfo(std::function<void(bool success, const Account& account)> callback);
+
+    // Toot interactions. Pass the status id; callback fires with success
+    // boolean once the server responds.
+    void FavouriteStatus(const std::string& statusId, std::function<void(bool success)> callback);
+    void UnfavouriteStatus(const std::string& statusId, std::function<void(bool success)> callback);
+    void ReblogStatus(const std::string& statusId, std::function<void(bool success)> callback);
+    void UnreblogStatus(const std::string& statusId, std::function<void(bool success)> callback);
 
     bool HasCredentials() const;
 

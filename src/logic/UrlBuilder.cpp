@@ -10,6 +10,34 @@ std::string TimelinePublic(const std::string& instance) {
     return "https://" + instance + "/api/v1/timelines/public?local=true";
 }
 
+std::string Notifications(const std::string& instance) {
+    return "https://" + instance + "/api/v1/notifications";
+}
+
+std::string Favourites(const std::string& instance) {
+    return "https://" + instance + "/api/v1/favourites";
+}
+
+std::string Bookmarks(const std::string& instance) {
+    return "https://" + instance + "/api/v1/bookmarks";
+}
+
+std::string FavouriteStatus(const std::string& instance, const std::string& statusId) {
+    return "https://" + instance + "/api/v1/statuses/" + statusId + "/favourite";
+}
+
+std::string UnfavouriteStatus(const std::string& instance, const std::string& statusId) {
+    return "https://" + instance + "/api/v1/statuses/" + statusId + "/unfavourite";
+}
+
+std::string ReblogStatus(const std::string& instance, const std::string& statusId) {
+    return "https://" + instance + "/api/v1/statuses/" + statusId + "/reblog";
+}
+
+std::string UnreblogStatus(const std::string& instance, const std::string& statusId) {
+    return "https://" + instance + "/api/v1/statuses/" + statusId + "/unreblog";
+}
+
 std::string AccountVerify(const std::string& instance) {
     return "https://" + instance + "/api/v1/accounts/verify_credentials";
 }

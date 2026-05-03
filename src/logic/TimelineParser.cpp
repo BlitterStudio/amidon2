@@ -17,6 +17,10 @@ Status ParseStatus(json_object* item) {
         s.id = json_object_get_string(val);
     if (json_object_object_get_ex(item, "content", &val) && json_object_is_type(val, json_type_string))
         s.content = json_object_get_string(val);
+    if (json_object_object_get_ex(item, "favourited", &val) && json_object_is_type(val, json_type_boolean))
+        s.favourited = json_object_get_boolean(val);
+    if (json_object_object_get_ex(item, "reblogged", &val) && json_object_is_type(val, json_type_boolean))
+        s.reblogged = json_object_get_boolean(val);
     if (json_object_object_get_ex(item, "account", &val) && json_object_is_type(val, json_type_object)) {
         json_object* acctVal = NULL;
         if (json_object_object_get_ex(val, "username", &acctVal) && json_object_is_type(acctVal, json_type_string))

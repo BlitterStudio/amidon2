@@ -7,6 +7,13 @@ namespace UrlBuilder {
 
 std::string TimelineHome(const std::string& instance);
 std::string TimelinePublic(const std::string& instance);
+std::string Notifications(const std::string& instance);
+std::string Favourites(const std::string& instance);
+std::string Bookmarks(const std::string& instance);
+std::string FavouriteStatus(const std::string& instance, const std::string& statusId);
+std::string UnfavouriteStatus(const std::string& instance, const std::string& statusId);
+std::string ReblogStatus(const std::string& instance, const std::string& statusId);
+std::string UnreblogStatus(const std::string& instance, const std::string& statusId);
 std::string AccountVerify(const std::string& instance);
 std::string OAuthToken(const std::string& instance);
 std::string RegisterApp(const std::string& instance);

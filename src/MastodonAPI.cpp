@@ -6,6 +6,7 @@
 #include "MastodonAPI.h"
 #include "logic/TimelineParser.h"
 #include "logic/AccountParser.h"
+#include "logic/NotificationParser.h"
 #include "logic/UrlBuilder.h"
 #include "logic/CredsParser.h"
 
@@ -145,8 +146,155 @@ void MastodonAPI::GetPublicTimeline(std::function<void(std::vector<Status>)> cal
     m_AsyncHttp->Get(url, "", parseTimeline);
 }
 
-void MastodonAPI::GetNotifications(std::function<void(std::vector<std::string>)> callback) {
-    if (callback) callback({});
+namespace {
+
+// Shared parser/dispatcher for endpoints that return a JSON array of Status.
+void RunStatusListGet(AsyncHttpService* asyncHttp, const std::string& url,
+                       const std::string& authHeader, const char* tag,
+                       std::function<void(std::vector<Status>)> callback) {
+    auto handler = [callback, tag](const std::string& response, long code) {
+        if (code != 200) {
+            fprintf(stderr, "%s failed code=%ld body=%.200s\n",
+                    tag, code, response.c_str());
+            if (callback) callback({});
+            return;
+        }
+        if (callback) callback(TimelineParser::ParseTimeline(response));
+    };
+
+    if (!asyncHttp) {
+        fprintf(stderr, "%s: AsyncHttp service unavailable\n", tag);
+        if (callback) callback({});
+        return;
+    }
+    asyncHttp->Get(url, authHeader, handler);
+}
+
+}  // namespace
+
+void MastodonAPI::GetFavourites(std::function<void(std::vector<Status>)> callback) {
+    if (m_InstanceURL.empty() || m_AccessToken.empty()) {
+        if (callback) callback({});
+        return;
+    }
+    RunStatusListGet(m_AsyncHttp,
+                      UrlBuilder::Favourites(m_InstanceURL),
+                      UrlBuilder::AuthHeader(m_AccessToken),
+                      "GetFavourites", callback);
+}
+
+void MastodonAPI::GetBookmarks(std::function<void(std::vector<Status>)> callback) {
+    if (m_InstanceURL.empty() || m_AccessToken.empty()) {
+        if (callback) callback({});
+        return;
+    }
+    RunStatusListGet(m_AsyncHttp,
+                      UrlBuilder::Bookmarks(m_InstanceURL),
+                      UrlBuilder::AuthHeader(m_AccessToken),
+                      "GetBookmarks", callback);
+}
+
+namespace {
+
+void RunStatusActionPost(AsyncHttpService* asyncHttp, const std::string& url,
+                         const std::string& authHeader, const char* tag,
+                         std::function<void(bool success)> callback) {
+    auto handler = [callback, tag](const std::string& response, long code) {
+        if (code != 200) {
+            fprintf(stderr, "%s failed code=%ld body=%.200s\n",
+                    tag, code, response.c_str());
+            if (callback) callback(false);
+            return;
+        }
+        if (callback) callback(true);
+    };
+
+    if (!asyncHttp) {
+        fprintf(stderr, "%s: AsyncHttp service unavailable\n", tag);
+        if (callback) callback(false);
+        return;
+    }
+    // The Mastodon /favourite, /reblog etc. endpoints take no body but do
+    // require the auth header. Send an empty JSON object so curl-style
+    // intermediaries don't reject a missing Content-Type/Length combo.
+    asyncHttp->Post(url, "{}", authHeader, "application/json", handler);
+}
+
+}  // namespace
+
+void MastodonAPI::FavouriteStatus(const std::string& statusId,
+                                    std::function<void(bool success)> callback) {
+    if (statusId.empty() || m_InstanceURL.empty() || m_AccessToken.empty()) {
+        if (callback) callback(false);
+        return;
+    }
+    RunStatusActionPost(m_AsyncHttp,
+                         UrlBuilder::FavouriteStatus(m_InstanceURL, statusId),
+                         UrlBuilder::AuthHeader(m_AccessToken),
+                         "FavouriteStatus", callback);
+}
+
+void MastodonAPI::UnfavouriteStatus(const std::string& statusId,
+                                      std::function<void(bool success)> callback) {
+    if (statusId.empty() || m_InstanceURL.empty() || m_AccessToken.empty()) {
+        if (callback) callback(false);
+        return;
+    }
+    RunStatusActionPost(m_AsyncHttp,
+                         UrlBuilder::UnfavouriteStatus(m_InstanceURL, statusId),
+                         UrlBuilder::AuthHeader(m_AccessToken),
+                         "UnfavouriteStatus", callback);
+}
+
+void MastodonAPI::ReblogStatus(const std::string& statusId,
+                                 std::function<void(bool success)> callback) {
+    if (statusId.empty() || m_InstanceURL.empty() || m_AccessToken.empty()) {
+        if (callback) callback(false);
+        return;
+    }
+    RunStatusActionPost(m_AsyncHttp,
+                         UrlBuilder::ReblogStatus(m_InstanceURL, statusId),
+                         UrlBuilder::AuthHeader(m_AccessToken),
+                         "ReblogStatus", callback);
+}
+
+void MastodonAPI::UnreblogStatus(const std::string& statusId,
+                                   std::function<void(bool success)> callback) {
+    if (statusId.empty() || m_InstanceURL.empty() || m_AccessToken.empty()) {
+        if (callback) callback(false);
+        return;
+    }
+    RunStatusActionPost(m_AsyncHttp,
+                         UrlBuilder::UnreblogStatus(m_InstanceURL, statusId),
+                         UrlBuilder::AuthHeader(m_AccessToken),
+                         "UnreblogStatus", callback);
+}
+
+void MastodonAPI::GetNotifications(std::function<void(std::vector<Notification>)> callback) {
+    if (m_InstanceURL.empty() || m_AccessToken.empty()) {
+        if (callback) callback({});
+        return;
+    }
+
+    std::string url = UrlBuilder::Notifications(m_InstanceURL);
+    std::string authHeader = UrlBuilder::AuthHeader(m_AccessToken);
+
+    auto parseNotifs = [callback](const std::string& response, long code) {
+        if (code != 200) {
+            fprintf(stderr, "GetNotifications failed code=%ld body=%.200s\n",
+                    code, response.c_str());
+            if (callback) callback({});
+            return;
+        }
+        if (callback) callback(NotificationParser::ParseNotifications(response));
+    };
+
+    if (!m_AsyncHttp) {
+        fprintf(stderr, "GetNotifications: AsyncHttp service unavailable\n");
+        if (callback) callback({});
+        return;
+    }
+    m_AsyncHttp->Get(url, authHeader, parseNotifs);
 }
 
 void MastodonAPI::PostStatus(const std::string& content, const std::string& visibility,

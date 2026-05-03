@@ -23,6 +23,7 @@ extern "C" {
 #include <proto/utility.h>
 #include <proto/socket.h>
 #include <clib/alib_protos.h>
+#include <mui/Guigfx_mcc.h>
 }
 
 #include <cstdio>
@@ -148,8 +149,9 @@ void App::Run() {
         m_API->SetAsyncHttp(m_AsyncHttp.get());
     }
 
-    bool useGuigfx = false;
-    m_MainWindow = std::make_unique<MainWindow>(*m_API, useGuigfx);
+    // MainWindow tries Guigfx.mcc at header-build time and falls back to
+    // Dtpic+Scrollgroup if it's not installed; no probe needed here.
+    m_MainWindow = std::make_unique<MainWindow>(*m_API);
 
     Object* winObj = m_MainWindow->Create();
     if (!winObj) {
@@ -192,6 +194,8 @@ void App::Run() {
 
                 m_API->GetAccountInfo([this, instance](bool success, const Account& account) {
                     if (!success) return;
+
+                    if (m_MainWindow) m_MainWindow->SetProfile(account);
 
                     std::string displayText = account.display_name.empty() ? account.username : account.display_name;
                     std::string avatarPath = CacheManager::GetAvatarPath(instance);
@@ -322,6 +326,71 @@ void App::Run() {
                 }
                 break;
             }
+            case APPRETURN_NAVIGATION: {
+                if (!m_MainWindow || !m_MainWindow->m_PageGroup) break;
+                LONG active = MUIV_List_Active_Off;
+                GetAttr(MUIA_List_Active, m_MainWindow->m_ListNavigationInner, (IPTR*)&active);
+                if (active != MUIV_List_Active_Off) {
+                    SetAttrs(m_MainWindow->m_PageGroup, MUIA_Group_ActivePage, (IPTR)active, TAG_DONE);
+                    // Auto-fetch on switch to a page that has live data.
+                    // Indices match the titles[] array in MainWindow::Create:
+                    // 0 Publish, 1 Notifications, 2 Explore, 3 Timeline, ...
+                    if (active == 1 && m_API && m_API->HasCredentials()) {
+                        m_MainWindow->FetchNotifications();
+                    } else if (active == 3) {
+                        m_MainWindow->FetchTimeline();
+                    } else if (active == 5 && m_API && m_API->HasCredentials()) {
+                        // Favourites
+                        m_MainWindow->FetchFavourites();
+                    } else if (active == 6 && m_API && m_API->HasCredentials()) {
+                        // Bookmarks
+                        m_MainWindow->FetchBookmarks();
+                    }
+                }
+                break;
+            }
+            case APPRETURN_REFRESH_NOTIFICATIONS:
+                if (m_MainWindow) m_MainWindow->FetchNotifications();
+                break;
+            case APPRETURN_NOTIFICATION_SELECT: {
+                if (!m_MainWindow || !m_MainWindow->m_ListNotificationsInner) break;
+                LONG active = MUIV_List_Active_Off;
+                GetAttr(MUIA_List_Active, m_MainWindow->m_ListNotificationsInner, (IPTR*)&active);
+                if (active != MUIV_List_Active_Off) {
+                    m_MainWindow->ShowNotification((int)active);
+                }
+                break;
+            }
+            case APPRETURN_REFRESH_FAVOURITES:
+                if (m_MainWindow) m_MainWindow->FetchFavourites();
+                break;
+            case APPRETURN_FAVOURITES_SELECT: {
+                if (!m_MainWindow || !m_MainWindow->m_ListFavouritesInner) break;
+                LONG active = MUIV_List_Active_Off;
+                GetAttr(MUIA_List_Active, m_MainWindow->m_ListFavouritesInner, (IPTR*)&active);
+                if (active != MUIV_List_Active_Off) {
+                    m_MainWindow->ShowFavourite((int)active);
+                }
+                break;
+            }
+            case APPRETURN_REFRESH_BOOKMARKS:
+                if (m_MainWindow) m_MainWindow->FetchBookmarks();
+                break;
+            case APPRETURN_BOOKMARKS_SELECT: {
+                if (!m_MainWindow || !m_MainWindow->m_ListBookmarksInner) break;
+                LONG active = MUIV_List_Active_Off;
+                GetAttr(MUIA_List_Active, m_MainWindow->m_ListBookmarksInner, (IPTR*)&active);
+                if (active != MUIV_List_Active_Off) {
+                    m_MainWindow->ShowBookmark((int)active);
+                }
+                break;
+            }
+            case APPRETURN_FAVOURITE_TOOT:
+                if (m_MainWindow) m_MainWindow->HandleFavouriteToot();
+                break;
+            case APPRETURN_BOOST_TOOT:
+                if (m_MainWindow) m_MainWindow->HandleBoostToot();
+                break;
             case APPRETURN_SAVE_SETTINGS:
                 {
                     std::string instance;
