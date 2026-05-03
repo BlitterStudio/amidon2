@@ -1,19 +1,18 @@
 #!/bin/bash
-# Build script for Amidon using the amigadev/crosstools container
+# Build script for Amidon2 using the sacredbanana Docker image
+# Image includes: NDK 3.2, Roadshow SDK, AmiSSL 5.18, MUI, json-c
 
-IMAGE="amigadev/crosstools:m68k-amigaos"
-WORK_DIR=$(pwd)
+IMAGE="sacredbanana/amiga-compiler:m68k-amigaos"
+WORK_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Find AmigaDev directory (assuming it's in the same parent as the project)
-AMIGADEV_PATH="$(cd "$(dirname "$0")/../../AmigaDev" && pwd)"
+echo "Building Amidon2 using $IMAGE..."
 
-echo "Building Amidon using $IMAGE..."
-echo "Using local SDKs from $AMIGADEV_PATH"
-
-docker run --rm -v "$WORK_DIR":/work -v "$AMIGADEV_PATH":/amigadev "$IMAGE" /bin/bash -c "
+docker run --rm -v "$WORK_DIR":/work -w /work "$IMAGE" /bin/bash -c "
+    rm -rf build && \
     mkdir -p build && \
     cd build && \
     cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/m68k-amigaos.cmake && \
-    make
+    make VERBOSE=1
 "
 
+echo "Done. Output: build/Amidon2"

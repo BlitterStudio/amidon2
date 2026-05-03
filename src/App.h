@@ -1,6 +1,6 @@
 /*
- * Amidon - a Mastodon client for AmigaOS
- * Copyright (C) 2024 Dimitris Panokostas
+ * Amidon2 - a Mastodon client for AmigaOS
+ * Copyright (C) 2026 Dimitris Panokostas
  */
 
 #ifndef APP_H
@@ -10,11 +10,13 @@
 #include <string>
 #include <memory>
 
+#include "MastodonAPI.h"
+#include "AsyncHttpService.h"
+
 class MainWindow;
-class WelcomeDialog; // Forward declaration
-class SettingsDialog; // Forward declaration
-class LoginDialog; // Forward declaration
-#include "../MastodonAPI.h" // Include API definition
+class WelcomeDialog;
+class SettingsDialog;
+class LoginDialog;
 
 class App {
 public:
@@ -24,33 +26,24 @@ public:
     void Run();
 
 private:
-   std::unique_ptr<MastodonAPI> m_API;
-   std::unique_ptr<AppRegistration> m_AppRegistration;
-   
-   // ... rest of private members
+    std::unique_ptr<MastodonAPI> m_API;
+    std::unique_ptr<AppRegistration> m_AppRegistration;
+    std::unique_ptr<AsyncHttpService> m_AsyncHttp;
+
     Object* m_App;
-    
-    // Windows
+
     std::unique_ptr<MainWindow> m_MainWindow;
-    // We'll use raw pointers for MUI objects if they are simple, 
-    // but better to wrap them in classes for logic handling.
-    // For now, let's keep references to active dialog helpers if needed,
-    // or just let them manage their own MUI objects.
-    
-    // Actually, following the pattern of MainWindow, we should probably have
-    // member variables for the dialog instances.
     std::unique_ptr<WelcomeDialog> m_WelcomeDialog;
     std::unique_ptr<SettingsDialog> m_SettingsDialog;
     std::unique_ptr<LoginDialog> m_LoginDialog;
 
     bool m_Running;
-    bool m_OwnedSocketBase = false; // Track if we opened SocketBase
-    
+    bool m_OwnedSocketBase = false;
+
     void InitializeMUI();
     void CleanupMUI();
-    
-    // Logic
-    bool HasSettings(); 
+
+    bool HasSettings();
     void ShowWelcome();
     void ShowMain();
     void ShowSettings();

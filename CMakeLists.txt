@@ -1,15 +1,53 @@
 cmake_minimum_required(VERSION 3.14)
-project(amidon VERSION 0.1 LANGUAGES C CXX)
+project(Amidon2 VERSION 0.2 LANGUAGES C CXX)
 
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mcrt=clib2")
+# clib2 runtime
+set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS} -mcrt=clib2")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mcrt=clib2")
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -mcrt=clib2")
 
-# Ensure feature checks can find libraries
-set(CMAKE_REQUIRED_LIBRARIES "-lauto")
+# Target CPU and optimisation
+set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS} -m68020 -msoft-float -O2 -Wall -Wno-multichar")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m68020 -msoft-float -O2 -Wall -Wno-multichar -fno-exceptions -fno-rtti")
+
+# AmiSSL for HTTPS
+add_definitions(-DHAVE_AMISSL)
+
+# Prevent POSIX_SOURCE from hiding AmigaOS definitions
+add_definitions(-U_POSIX_SOURCE)
+
+# Include paths
+include_directories(
+    src
+    src/logic
+    src/ui
+    src/vendor
+    vendor/json-c
+    vendor/json-c/include/json-c
+)
+
+# Vendored json-c source (rebuilt from source to avoid base-relative reloc issues)
+set(JSON_C_SOURCES
+    vendor/json-c/arraylist.c
+    vendor/json-c/debug.c
+    vendor/json-c/json_c_version.c
+    vendor/json-c/json_object.c
+    vendor/json-c/json_object_iterator.c
+    vendor/json-c/json_patch.c
+    vendor/json-c/json_pointer.c
+    vendor/json-c/json_tokener.c
+    vendor/json-c/json_util.c
+    vendor/json-c/json_visit.c
+    vendor/json-c/linkhash.c
+    vendor/json-c/printbuf.c
+    vendor/json-c/random_seed.c
+    vendor/json-c/strerror_override.c
+)
 
 # Source files
 set(SOURCES
@@ -22,35 +60,37 @@ set(SOURCES
     src/ui/LoginDialog.cpp
     src/MastodonAPI.cpp
     src/HttpClient.cpp
-    src/compat.cpp
+    src/CacheManager.cpp
+    src/AsyncHttpService.cpp
+    # Logic (platform-free)
+    src/logic/TimelineParser.cpp
+    src/logic/AccountParser.cpp
+    src/logic/SettingsParser.cpp
+    src/logic/TootFormatter.cpp
+    src/logic/UrlBuilder.cpp
+    src/logic/CredsParser.cpp
+    # HTMLview network hook (C, compiled with HAVE_AMISSL)
+    src/vendor/htmlview_nethook.c
 )
 
-# Includes
-include_directories(
-    src
-    src/ui
-)
+add_executable(Amidon2 ${SOURCES} ${JSON_C_SOURCES})
 
-# Executable
-add_executable(amidon ${SOURCES})
-
-# System libs (clib2)
-# These lines are already present above, no change needed# System libs
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m68020 -msoft-float -O0 -U_POSIX_SOURCE -include ${CMAKE_SOURCE_DIR}/src/compat_errno.h")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m68020 -msoft-float -O0 -U_POSIX_SOURCE -include ${CMAKE_SOURCE_DIR}/src/compat_errno.h -fno-exceptions -fno-rtti")
-set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}")
- 
- # force allow multiple definition
- target_link_options(amidon PRIVATE "LINKER:--allow-multiple-definition")
-
-# Link Libraries
-target_link_libraries(amidon PRIVATE
+# Link libraries
+target_link_libraries(Amidon2 PRIVATE
     -lmui
+    -lamisslauto
     -latomic
 )
+
+# Allow multiple definitions (clib2 / amisslauto interplay)
+target_link_options(Amidon2 PRIVATE "LINKER:--allow-multiple-definition")
 
 # Copy assets to build directory
 file(COPY ${CMAKE_SOURCE_DIR}/assets DESTINATION ${CMAKE_BINARY_DIR})
 
 # Copy default icon
-configure_file(${CMAKE_SOURCE_DIR}/icons/GlowIcon/Amidon_OS3.info ${CMAKE_BINARY_DIR}/amidon.info COPYONLY)
+configure_file(
+    ${CMAKE_SOURCE_DIR}/icons/GlowIcon/Amidon_OS3.info
+    ${CMAKE_BINARY_DIR}/Amidon2.info
+    COPYONLY
+)

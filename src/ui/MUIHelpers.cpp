@@ -5,6 +5,7 @@
 
 #include "MUIHelpers.h"
 
+#include <cstdio>
 #include <stdarg.h>
 #include <vector>
 #include <utility/tagitem.h>
@@ -13,7 +14,7 @@
 extern "C" {
 
 Object* MUIHelpers_NewObject(const char* classname, ...) {
-    // printf("DEBUG: MUIHelpers_NewObject for class '%p'\n", classname);
+    // printf("DEBUG: MUIHelpers_NewObject for class '%s'\n", classname);
     va_list args;
     va_start(args, classname);
     
@@ -33,9 +34,9 @@ Object* MUIHelpers_NewObject(const char* classname, ...) {
     
     va_end(args);
     
-     // printf("DEBUG: Calling MUI_NewObjectA for %p...\n", classname);
+     // printf("DEBUG: Calling MUI_NewObjectA for %s...\n", classname);
     Object* obj = MUI_NewObjectA(classname, tags.data());
-     if (!obj) printf("DEBUG: MUI_NewObjectA returned NULL for class '%p'\n", classname);
+     if (!obj) printf("DEBUG: MUI_NewObjectA returned NULL for class '%s'\n", classname);
     return obj;
 }
 

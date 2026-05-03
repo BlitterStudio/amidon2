@@ -54,7 +54,12 @@ dkms.conf
 # debug information files
 *.dwo
 
-# Build directory
+# Build directories
 build/
+build-tests/
 .DS_Store
 _UAEFSDB.___
+
+# IDE
+.vscode/
+.idea/

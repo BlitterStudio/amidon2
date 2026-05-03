@@ -8,9 +8,7 @@
 
 #include <string>
 #include <functional>
-#include <map>
 
-// Callback signature: Body, StatusCode
 using HttpCallback = std::function<void(const std::string&, long)>;
 
 class HttpClient {
@@ -18,14 +16,18 @@ public:
     HttpClient();
     ~HttpClient();
 
-    // Perform a GET request
     void Get(const std::string& url, HttpCallback callback);
-
-    // Perform a POST request
     void Post(const std::string& url, const std::string& payload, HttpCallback callback);
 
+    void GetWithHeaders(const std::string& url, const std::string& authHeader, HttpCallback callback);
+    void PostWithHeaders(const std::string& url, const std::string& payload,
+                         const std::string& contentType, const std::string& authHeader,
+                         HttpCallback callback);
+
 private:
-    static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp);
+    void PerformRequest(const std::string& method, const std::string& url,
+                        const std::string& body, const std::string& authHeader,
+                        const std::string& contentType, HttpCallback callback);
 };
 
 #endif // HTTP_CLIENT_H

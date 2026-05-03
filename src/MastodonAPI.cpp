@@ -1,88 +1,78 @@
-#include "MastodonAPI.h"
-#include <cstdio>
+/*
+ * Amidon2 - a Mastodon client for AmigaOS
+ * Copyright (C) 2026 Dimitris Panokostas
+ */
 
-MastodonAPI::MastodonAPI() {
+#include "MastodonAPI.h"
+#include "logic/TimelineParser.h"
+#include "logic/AccountParser.h"
+#include "logic/UrlBuilder.h"
+#include "logic/CredsParser.h"
+
+extern "C" {
 }
 
-void MastodonAPI::RegisterApp(const std::string& instance, std::function<void(bool success, const AppRegistration& reg)> callback) {
-    std::string url = "https://" + instance + "/api/v1/apps";
-    
-    // Construct simple JSON payload manually to avoid heavy dependencies for sending
-    // Since we only send simple fields, this is safe enough.
-    std::string payload = "{";
-    payload += "\"client_name\": \"Amidon\",";
-    payload += "\"redirect_uris\": \"urn:ietf:wg:oauth:2.0:oob\",";
-    payload += "\"scopes\": \"read write follow push\"";
-    payload += "}";
+#include <cstdio>
 
-    m_Client.Post(url, payload, [callback, instance](const std::string& response, int code) {
-        if (code == 200) {
-            picojson::value v;
-            std::string err = picojson::parse(v, response);
-            if (!err.empty()) {
-                fprintf(stderr, "JSON parse error: %s\n", err.c_str());
-                if (callback) callback(false, {});
-                return;
-            }
+MastodonAPI::MastodonAPI() : m_AsyncHttp(nullptr) {
+}
 
-            if (!v.is<picojson::object>()) {
-                fprintf(stderr, "JSON is not an object\n");
-                 if (callback) callback(false, {});
-                 return;
-            }
-            
-            picojson::object& o = v.get<picojson::object>();
-            AppRegistration reg;
-            reg.instance_url = instance;
-            if (o["client_id"].is<std::string>()) reg.client_id = o["client_id"].get<std::string>();
-            if (o["client_secret"].is<std::string>()) reg.client_secret = o["client_secret"].get<std::string>();
+void MastodonAPI::SetAsyncHttp(AsyncHttpService* asyncHttp) {
+    m_AsyncHttp = asyncHttp;
+}
 
+void MastodonAPI::RegisterApp(const std::string& instance,
+    std::function<void(bool success, const AppRegistration& reg)> callback) {
+    std::string url = UrlBuilder::RegisterApp(instance);
+
+    json_object* payload = json_object_new_object();
+    json_object_object_add(payload, "client_name", json_object_new_string("Amidon"));
+    json_object_object_add(payload, "redirect_uris", json_object_new_string("urn:ietf:wg:oauth:2.0:oob"));
+    json_object_object_add(payload, "scopes", json_object_new_string("read write follow push"));
+    const char* payloadStr = json_object_to_json_string(payload);
+
+    m_Client.Post(url, payloadStr, [callback, instance](const std::string& response, long code) {
+        AppRegistration reg;
+        if (CredsParser::ParseRegistration(response, instance, reg)) {
             if (callback) callback(true, reg);
         } else {
-            fprintf(stderr, "RegisterApp failed with code: %d\n", code);
+            fprintf(stderr, "RegisterApp: JSON parse error\n");
             if (callback) callback(false, {});
         }
     });
+
+    json_object_put(payload);
 }
 
-void MastodonAPI::GetToken(const AppRegistration& reg, const std::string& authCode, std::function<void(bool success, const std::string& token)> callback) {
-    std::string url = "https://" + reg.instance_url + "/oauth/token";
+void MastodonAPI::GetToken(const AppRegistration& reg, const std::string& authCode,
+    std::function<void(bool success, const std::string& token)> callback) {
+    std::string url = UrlBuilder::OAuthToken(reg.instance_url);
 
-    std::string payload = "{";
-    payload += "\"client_id\": \"" + reg.client_id + "\",";
-    payload += "\"client_secret\": \"" + reg.client_secret + "\",";
-    payload += "\"redirect_uri\": \"urn:ietf:wg:oauth:2.0:oob\",";
-    payload += "\"grant_type\": \"authorization_code\",";
-    payload += "\"code\": \"" + authCode + "\"";
-    payload += "}";
-    
-    m_Client.Post(url, payload, [callback](const std::string& response, int code) {
-        if (code == 200) {
-             picojson::value v;
-             std::string err = picojson::parse(v, response);
-             if (!err.empty()) {
-                 fprintf(stderr, "JSON parse error: %s\n", err.c_str());
-                 if (callback) callback(false, "");
-                 return;
-             }
-             
-             if (!v.is<picojson::object>()) {
-                  if (callback) callback(false, "");
-                  return;
-             }
+    json_object* payload = json_object_new_object();
+    json_object_object_add(payload, "client_id", json_object_new_string(reg.client_id.c_str()));
+    json_object_object_add(payload, "client_secret", json_object_new_string(reg.client_secret.c_str()));
+    json_object_object_add(payload, "redirect_uri", json_object_new_string("urn:ietf:wg:oauth:2.0:oob"));
+    json_object_object_add(payload, "grant_type", json_object_new_string("authorization_code"));
+    json_object_object_add(payload, "code", json_object_new_string(authCode.c_str()));
+    const char* payloadStr = json_object_to_json_string(payload);
 
-             picojson::object& o = v.get<picojson::object>();
-             if (o["access_token"].is<std::string>()) {
-                 std::string token = o["access_token"].get<std::string>();
-                 if (callback) callback(true, token);
-             } else {
-                 if (callback) callback(false, "");
-             }
+    m_Client.Post(url, payloadStr, [callback](const std::string& response, long code) {
+        if (code != 200) {
+            fprintf(stderr, "GetToken failed with code: %ld\n", code);
+            if (callback) callback(false, "");
+            return;
+        }
+
+        std::string accessToken;
+        if (CredsParser::ParseToken(response, accessToken)) {
+            if (callback) callback(true, accessToken);
         } else {
-            fprintf(stderr, "GetToken failed with code: %d\n", code);
+            fprintf(stderr, "GetToken: JSON parse error\n");
             if (callback) callback(false, "");
         }
     });
+
+    json_object_put(payload);
 }
 
 void MastodonAPI::SetCredentials(const std::string& instance, const std::string& token) {
@@ -92,71 +82,28 @@ void MastodonAPI::SetCredentials(const std::string& instance, const std::string&
 
 void MastodonAPI::GetHomeTimeline(std::function<void(std::vector<Status>)> callback) {
     if (m_InstanceURL.empty() || m_AccessToken.empty()) {
-        // printf("DEBUG: GetHomeTimeline skipped - Not Authenticated (URL: '%s', Token empty? %d)\n", m_InstanceURL.c_str(), m_AccessToken.empty());
         if (callback) callback({});
         return;
     }
 
-    std::string url = "https://" + m_InstanceURL + "/api/v1/timelines/home?access_token=" + m_AccessToken;
-    // printf("DEBUG: GetHomeTimeline URL: %s\n", url.c_str());
-    
-    m_Client.Get(url, [callback](const std::string& response, int code) {
-        // printf("DEBUG: API Response Code: %d\n", code);
-        // printf("DEBUG: API Response Body: %s\n", response.c_str()); // Commented out to avoid spam
-        
-        if (code == 200) {
-            picojson::value v;
-            std::string err = picojson::parse(v, response);
-            if (!err.empty()) {
-                 fprintf(stderr, "JSON parse error: %s\n", err.c_str());
-                 if (callback) callback({});
-                 return;
-            }
-            
-            if (!v.is<picojson::array>()) {
-                fprintf(stderr, "JSON is not an array\n");
-                if (callback) callback({});
-                return;
-            }
-            
-            std::vector<Status> timeline;
-            const picojson::array& list = v.get<picojson::array>();
-            
-            for (const auto& item : list) {
-                if (item.is<picojson::object>()) {
-                    const picojson::object& statusObj = item.get<picojson::object>();
-                    Status s;
-                    
-                    if (statusObj.count("id") && statusObj.at("id").is<std::string>())
-                         s.id = statusObj.at("id").get<std::string>();
-                         
-                    if (statusObj.count("content") && statusObj.at("content").is<std::string>())
-                         s.content = statusObj.at("content").get<std::string>();
-                    
-                    // Account
-                    if (statusObj.count("account") && statusObj.at("account").is<picojson::object>()) {
-                        const picojson::object& acct = statusObj.at("account").get<picojson::object>();
-                        if (acct.count("username") && acct.at("username").is<std::string>())
-                            s.author_username = acct.at("username").get<std::string>();
-                        if (acct.count("display_name") && acct.at("display_name").is<std::string>())
-                            s.author_displayname = acct.at("display_name").get<std::string>();
-                    }
-                    
-                    timeline.push_back(s);
-                }
-            }
-            
-            if (callback) callback(timeline);
-        } else {
-             fprintf(stderr, "GetHomeTimeline failed with code: %d\n", code);
-             if (callback) callback({});
+    std::string url = UrlBuilder::TimelineHome(m_InstanceURL);
+    std::string authHeader = UrlBuilder::AuthHeader(m_AccessToken);
+
+    auto parseTimeline = [callback](const std::string& response, long code) {
+        if (code != 200) {
+            fprintf(stderr, "GetHomeTimeline failed with code: %ld\n", code);
+            if (callback) callback({});
+            return;
         }
-    });
-}
 
+        if (callback) callback(TimelineParser::ParseTimeline(response));
+    };
 
-bool MastodonAPI::HasCredentials() const {
-    return !m_InstanceURL.empty() && !m_AccessToken.empty();
+    if (m_AsyncHttp) {
+        m_AsyncHttp->Get(url, authHeader, parseTimeline);
+    } else {
+        m_Client.GetWithHeaders(url, authHeader, parseTimeline);
+    }
 }
 
 void MastodonAPI::GetPublicTimeline(std::function<void(std::vector<Status>)> callback) {
@@ -165,65 +112,108 @@ void MastodonAPI::GetPublicTimeline(std::function<void(std::vector<Status>)> cal
         return;
     }
 
-    // Public timeline does not strictly require a token
-    std::string url = "https://" + m_InstanceURL + "/api/v1/timelines/public?local=true"; // Default to local public
-    // printf("DEBUG: GetPublicTimeline URL: %s\n", url.c_str());
-    
-    m_Client.Get(url, [callback](const std::string& response, int code) {
-        // printf("DEBUG: API Response Code: %d\n", code);
-        
-        if (code == 200) {
-            picojson::value v;
-            std::string err = picojson::parse(v, response);
-            if (!err.empty()) {
-                 fprintf(stderr, "JSON parse error: %s\n", err.c_str());
-                 if (callback) callback({});
-                 return;
-            }
-            
-            if (!v.is<picojson::array>()) {
-                fprintf(stderr, "JSON is not an array\n");
-                if (callback) callback({});
-                return;
-            }
-            
-            std::vector<Status> timeline;
-            const picojson::array& list = v.get<picojson::array>();
-            
-            for (const auto& item : list) {
-                if (item.is<picojson::object>()) {
-                    const picojson::object& statusObj = item.get<picojson::object>();
-                    Status s;
-                    
-                    if (statusObj.count("id") && statusObj.at("id").is<std::string>())
-                         s.id = statusObj.at("id").get<std::string>();
-                         
-                    if (statusObj.count("content") && statusObj.at("content").is<std::string>())
-                         s.content = statusObj.at("content").get<std::string>();
-                    
-                    // Account
-                    if (statusObj.count("account") && statusObj.at("account").is<picojson::object>()) {
-                        const picojson::object& acct = statusObj.at("account").get<picojson::object>();
-                        if (acct.count("username") && acct.at("username").is<std::string>())
-                            s.author_username = acct.at("username").get<std::string>();
-                        if (acct.count("display_name") && acct.at("display_name").is<std::string>())
-                            s.author_displayname = acct.at("display_name").get<std::string>();
-                    }
-                    
-                    timeline.push_back(s);
-                }
-            }
-            
-            if (callback) callback(timeline);
-        } else {
-             fprintf(stderr, "GetPublicTimeline failed with code: %d\n", code);
-             if (callback) callback({});
+    std::string url = UrlBuilder::TimelinePublic(m_InstanceURL);
+    m_Client.Get(url, [callback](const std::string& response, long code) {
+        if (code != 200) {
+            fprintf(stderr, "GetPublicTimeline failed with code: %ld\n", code);
+            if (callback) callback({});
+            return;
         }
+
+        if (callback) callback(TimelineParser::ParseTimeline(response));
     });
 }
 
 void MastodonAPI::GetNotifications(std::function<void(std::vector<std::string>)> callback) {
     if (callback) callback({});
+}
+
+void MastodonAPI::PostStatus(const std::string& content, const std::string& visibility,
+    const std::string& spoilerText,
+    std::function<void(bool success, const std::string& statusId)> callback) {
+    if (m_InstanceURL.empty() || m_AccessToken.empty()) {
+        if (callback) callback(false, "");
+        return;
+    }
+
+    std::string url = "https://" + m_InstanceURL + "/api/v1/statuses";
+
+    json_object* payload = json_object_new_object();
+    json_object_object_add(payload, "status", json_object_new_string(content.c_str()));
+    json_object_object_add(payload, "visibility", json_object_new_string(visibility.c_str()));
+    if (!spoilerText.empty())
+        json_object_object_add(payload, "spoiler_text", json_object_new_string(spoilerText.c_str()));
+    const char* payloadStr = json_object_to_json_string(payload);
+
+    std::string authHeader = UrlBuilder::AuthHeader(m_AccessToken);
+
+    auto handlePostResponse = [callback](const std::string& response, long code) {
+        if (code != 200 && code != 201) {
+            fprintf(stderr, "PostStatus failed with code: %ld\n", code);
+            if (callback) callback(false, "");
+            return;
+        }
+
+        json_object* root = json_tokener_parse(response.c_str());
+        if (!root) {
+            fprintf(stderr, "PostStatus: JSON parse error\n");
+            if (callback) callback(false, "");
+            return;
+        }
+
+        json_object* val = NULL;
+        if (json_object_object_get_ex(root, "id", &val) && json_object_is_type(val, json_type_string)) {
+            std::string id = json_object_get_string(val);
+            json_object_put(root);
+            if (callback) callback(true, id);
+        } else {
+            json_object_put(root);
+            if (callback) callback(false, "");
+        }
+    };
+
+    if (m_AsyncHttp) {
+        m_AsyncHttp->Post(url, payloadStr, authHeader, "application/json", handlePostResponse);
+    } else {
+        m_Client.PostWithHeaders(url, payloadStr, "application/json", authHeader, handlePostResponse);
+    }
+
+    json_object_put(payload);
+}
+
+void MastodonAPI::GetAccountInfo(std::function<void(bool success, const Account& account)> callback) {
+    if (m_InstanceURL.empty() || m_AccessToken.empty()) {
+        if (callback) callback(false, {});
+        return;
+    }
+
+    std::string url = UrlBuilder::AccountVerify(m_InstanceURL);
+    std::string authHeader = UrlBuilder::AuthHeader(m_AccessToken);
+
+    auto parseAccount = [callback](const std::string& response, long code) {
+        if (code != 200) {
+            fprintf(stderr, "GetAccountInfo failed with code: %ld\n", code);
+            if (callback) callback(false, {});
+            return;
+        }
+
+        Account acct = AccountParser::ParseAccount(response);
+        if (acct.id.empty()) {
+            if (callback) callback(false, {});
+            return;
+        }
+        if (callback) callback(true, acct);
+    };
+
+    if (m_AsyncHttp) {
+        m_AsyncHttp->Get(url, authHeader, parseAccount);
+    } else {
+        m_Client.GetWithHeaders(url, authHeader, parseAccount);
+    }
+}
+
+bool MastodonAPI::HasCredentials() const {
+    return !m_InstanceURL.empty() && !m_AccessToken.empty();
 }
 
 bool MastodonAPI::Login(const std::string& instance, const std::string& email, const std::string& password) {

@@ -1,60 +1,72 @@
-/*
- * Amidon - a Mastodon client for AmigaOS
- * Copyright (C) 2024 Dimitris Panokostas
- */
-
 #ifndef UI_MAINWINDOW_H
 #define UI_MAINWINDOW_H
 
-#include <libraries/mui.h>
 #include "../MastodonAPI.h"
-#include <vector>
-#include <string>
+#include <proto/muimaster.h>
+#include <libraries/mui.h>
 
-#ifndef IPTR
-typedef unsigned long IPTR;
-#endif
+#include <string>
+#include <vector>
+#include <list>
+
+extern "C" {
+#include <clib/alib_protos.h>
+#include "HTMLview_mcc.h"
+#include "htmlview_nethook.h"
+}
+
+class MastodonAPI;
 
 class MainWindow {
 public:
-    MainWindow();
+    MainWindow(MastodonAPI& api, bool useGuigfx = false);
     Object* Create();
     void FetchTimeline();
+    void HandlePost();
+    void SetAccountInfo(const std::string& username, const std::string& instance, const std::string& avatarPath);
+    void UpdateCharacterCounter();
+    void ShowToot(int index);
+    void InitNotifications(Object* app);
     Object* GetMUIObject() { return m_Window; }
 
-
-    // UI Elements
     Object* m_Window;
     Object* m_ListTimeline;
+    Object* m_ListTimelineInner;
     Object* m_ListNavigation;
     Object* m_PageGroup;
-    
-    // Buttons
+
     Object* m_BtnRefreshTimeline;
-    
-    // Data Management
-    std::vector<std::string> m_TimelineStrings;
-    
-    // Menu Items
+
+    Object* m_LabelUsername;
+    Object* m_LabelInstance;
+    Object* m_ImageAvatar;
+
+    Object* m_TextEditor;
+    Object* m_LabelCharCount;
+    Object* m_CycleVisibility;
+    Object* m_CheckCW;
+    Object* m_StringCW;
+    Object* m_BtnPost;
+
+    Object* m_Htmlview;
+    struct Hook m_NetHook;
+
     Object* m_ItemQuit;
     Object* m_ItemSettings;
     Object* m_ItemMUI;
-    
-    // Pages
-    struct {
-        Object* Publish;
-        Object* Notifications;
-        Object* Explore;
-        Object* Timeline;
-        Object* DMS;
-        Object* Favourites;
-        Object* Bookmarks;
-        Object* Lists;
-        Object* Requests;
-        Object* Profile;
-    } m_Pages;
 
-    // Page Groups
+    // Data Management
+    std::list<std::string> m_TimelineStrings;
+    std::vector<Status> m_TimelineData;
+
+    struct Hook m_TextEditorHook;
+
+private:
+    MastodonAPI& m_API;
+    Object* m_App;
+    bool m_UseGuigfx;
+
+    Object* CreateHeader();
     Object* CreatePublishPage();
     Object* CreateNotificationsPage();
     Object* CreateExplorePage();
@@ -65,15 +77,7 @@ public:
     Object* CreateListsPage();
     Object* CreateRequestsPage();
     Object* CreateProfilePage();
-    
-    // Helpers
     Object* CreateMenu();
-    void InitNotifications(Object* app);
-    Object* CreateHeader();
-
-    MastodonAPI& m_API;
-    
-    MainWindow(MastodonAPI& api);
 };
 
 #endif // UI_MAINWINDOW_H
