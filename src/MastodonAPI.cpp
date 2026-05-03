@@ -9,9 +9,6 @@
 #include "logic/UrlBuilder.h"
 #include "logic/CredsParser.h"
 
-extern "C" {
-}
-
 #include <cstdio>
 
 MastodonAPI::MastodonAPI() : m_AsyncHttp(nullptr) {
@@ -29,9 +26,9 @@ void MastodonAPI::RegisterApp(const std::string& instance,
     json_object_object_add(payload, "client_name", json_object_new_string("Amidon"));
     json_object_object_add(payload, "redirect_uris", json_object_new_string("urn:ietf:wg:oauth:2.0:oob"));
     json_object_object_add(payload, "scopes", json_object_new_string("read write follow push"));
-    const char* payloadStr = json_object_to_json_string(payload);
+    std::string payloadStr = json_object_to_json_string(payload);
 
-    m_Client.Post(url, payloadStr, [callback, instance](const std::string& response, long code) {
+    auto handleResponse = [callback, instance](const std::string& response, long code) {
         AppRegistration reg;
         if (CredsParser::ParseRegistration(response, instance, reg)) {
             if (callback) callback(true, reg);
@@ -39,8 +36,15 @@ void MastodonAPI::RegisterApp(const std::string& instance,
             fprintf(stderr, "RegisterApp: JSON parse error\n");
             if (callback) callback(false, {});
         }
-    });
+    };
 
+    if (!m_AsyncHttp) {
+        fprintf(stderr, "RegisterApp: AsyncHttp service unavailable\n");
+        if (callback) callback(false, {});
+        json_object_put(payload);
+        return;
+    }
+    m_AsyncHttp->Post(url, payloadStr, "", "application/json", handleResponse);
     json_object_put(payload);
 }
 
@@ -54,9 +58,9 @@ void MastodonAPI::GetToken(const AppRegistration& reg, const std::string& authCo
     json_object_object_add(payload, "redirect_uri", json_object_new_string("urn:ietf:wg:oauth:2.0:oob"));
     json_object_object_add(payload, "grant_type", json_object_new_string("authorization_code"));
     json_object_object_add(payload, "code", json_object_new_string(authCode.c_str()));
-    const char* payloadStr = json_object_to_json_string(payload);
+    std::string payloadStr = json_object_to_json_string(payload);
 
-    m_Client.Post(url, payloadStr, [callback](const std::string& response, long code) {
+    auto handleResponse = [callback](const std::string& response, long code) {
         if (code != 200) {
             fprintf(stderr, "GetToken failed with code: %ld\n", code);
             if (callback) callback(false, "");
@@ -70,8 +74,15 @@ void MastodonAPI::GetToken(const AppRegistration& reg, const std::string& authCo
             fprintf(stderr, "GetToken: JSON parse error\n");
             if (callback) callback(false, "");
         }
-    });
+    };
 
+    if (!m_AsyncHttp) {
+        fprintf(stderr, "GetToken: AsyncHttp service unavailable\n");
+        if (callback) callback(false, "");
+        json_object_put(payload);
+        return;
+    }
+    m_AsyncHttp->Post(url, payloadStr, "", "application/json", handleResponse);
     json_object_put(payload);
 }
 
@@ -99,11 +110,12 @@ void MastodonAPI::GetHomeTimeline(std::function<void(std::vector<Status>)> callb
         if (callback) callback(TimelineParser::ParseTimeline(response));
     };
 
-    if (m_AsyncHttp) {
-        m_AsyncHttp->Get(url, authHeader, parseTimeline);
-    } else {
-        m_Client.GetWithHeaders(url, authHeader, parseTimeline);
+    if (!m_AsyncHttp) {
+        fprintf(stderr, "GetHomeTimeline: AsyncHttp service unavailable\n");
+        if (callback) callback({});
+        return;
     }
+    m_AsyncHttp->Get(url, authHeader, parseTimeline);
 }
 
 void MastodonAPI::GetPublicTimeline(std::function<void(std::vector<Status>)> callback) {
@@ -113,15 +125,24 @@ void MastodonAPI::GetPublicTimeline(std::function<void(std::vector<Status>)> cal
     }
 
     std::string url = UrlBuilder::TimelinePublic(m_InstanceURL);
-    m_Client.Get(url, [callback](const std::string& response, long code) {
+
+    auto parseTimeline = [callback](const std::string& response, long code) {
         if (code != 200) {
-            fprintf(stderr, "GetPublicTimeline failed with code: %ld\n", code);
+            fprintf(stderr, "GetPublicTimeline failed code=%ld body=%.200s\n",
+                    code, response.c_str());
             if (callback) callback({});
             return;
         }
 
         if (callback) callback(TimelineParser::ParseTimeline(response));
-    });
+    };
+
+    if (!m_AsyncHttp) {
+        fprintf(stderr, "GetPublicTimeline: AsyncHttp service unavailable\n");
+        if (callback) callback({});
+        return;
+    }
+    m_AsyncHttp->Get(url, "", parseTimeline);
 }
 
 void MastodonAPI::GetNotifications(std::function<void(std::vector<std::string>)> callback) {
@@ -172,12 +193,13 @@ void MastodonAPI::PostStatus(const std::string& content, const std::string& visi
         }
     };
 
-    if (m_AsyncHttp) {
-        m_AsyncHttp->Post(url, payloadStr, authHeader, "application/json", handlePostResponse);
-    } else {
-        m_Client.PostWithHeaders(url, payloadStr, "application/json", authHeader, handlePostResponse);
+    if (!m_AsyncHttp) {
+        fprintf(stderr, "PostStatus: AsyncHttp service unavailable\n");
+        if (callback) callback(false, "");
+        json_object_put(payload);
+        return;
     }
-
+    m_AsyncHttp->Post(url, payloadStr, authHeader, "application/json", handlePostResponse);
     json_object_put(payload);
 }
 
@@ -205,11 +227,12 @@ void MastodonAPI::GetAccountInfo(std::function<void(bool success, const Account&
         if (callback) callback(true, acct);
     };
 
-    if (m_AsyncHttp) {
-        m_AsyncHttp->Get(url, authHeader, parseAccount);
-    } else {
-        m_Client.GetWithHeaders(url, authHeader, parseAccount);
+    if (!m_AsyncHttp) {
+        fprintf(stderr, "GetAccountInfo: AsyncHttp service unavailable\n");
+        if (callback) callback(false, {});
+        return;
     }
+    m_AsyncHttp->Get(url, authHeader, parseAccount);
 }
 
 bool MastodonAPI::HasCredentials() const {

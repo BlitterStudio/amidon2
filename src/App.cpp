@@ -46,11 +46,15 @@ App::App() : m_App(nullptr), m_Running(false) {
 }
 
 App::~App() {
+    // Cancel any in-flight HTTP request first so HttpRequest's destructor
+    // (CloseSSL + CloseSocket) runs while bsdsocket.library is still open.
+    m_AsyncHttp.reset();
     m_API.reset();
     m_AppRegistration.reset();
 
     if (m_App) {
         MUI_DisposeObject(m_App);
+        m_App = nullptr;
     }
     CleanupMUI();
 }
@@ -187,15 +191,24 @@ void App::Run() {
                 m_API->SetCredentials(instance, token);
 
                 m_API->GetAccountInfo([this, instance](bool success, const Account& account) {
-                    if (success) {
-                        std::string avatarPath = CacheManager::GetAvatarPath(instance);
-                        struct stat st;
-                        if (stat(avatarPath.c_str(), &st) != 0) {
-                            CacheManager::SaveAvatar(instance, account.avatar);
-                        }
+                    if (!success) return;
 
-                        std::string displayText = account.display_name.empty() ? account.username : account.display_name;
+                    std::string displayText = account.display_name.empty() ? account.username : account.display_name;
+                    std::string avatarPath = CacheManager::GetAvatarPath(instance);
+                    struct stat st;
+                    bool haveCached = stat(avatarPath.c_str(), &st) == 0;
+
+                    if (haveCached) {
                         m_MainWindow->SetAccountInfo(displayText, instance, avatarPath);
+                    } else {
+                        // Show name immediately; avatar fills in once downloaded.
+                        m_MainWindow->SetAccountInfo(displayText, instance, "");
+                        DownloadAvatar(instance, account.avatar,
+                            [this, displayText, instance](const std::string& path) {
+                                if (!path.empty() && m_MainWindow) {
+                                    m_MainWindow->SetAccountInfo(displayText, instance, path);
+                                }
+                            });
                     }
                 });
 
@@ -258,13 +271,18 @@ void App::Run() {
                                      json_object_put(obj);
 
                                      m_API->GetAccountInfo([this, instance](bool success, const Account& account) {
-                                         if (success) {
-                                             CacheManager::SaveAvatar(instance, account.avatar);
+                                         if (!success) return;
 
-                                             std::string displayText = account.display_name.empty() ? account.username : account.display_name;
-                                             std::string avatarPath = CacheManager::GetAvatarPath(instance);
-                                             m_MainWindow->SetAccountInfo(displayText, instance, avatarPath);
-                                         }
+                                         std::string displayText = account.display_name.empty() ? account.username : account.display_name;
+
+                                         // Show name immediately; avatar fills in once downloaded.
+                                         m_MainWindow->SetAccountInfo(displayText, instance, "");
+                                         DownloadAvatar(instance, account.avatar,
+                                             [this, displayText, instance](const std::string& path) {
+                                                 if (!path.empty() && m_MainWindow) {
+                                                     m_MainWindow->SetAccountInfo(displayText, instance, path);
+                                                 }
+                                             });
                                      });
 
                                      if (m_LoginDialog) {
@@ -306,8 +324,9 @@ void App::Run() {
             }
             case APPRETURN_SAVE_SETTINGS:
                 {
+                    std::string instance;
                     if (m_SettingsDialog) {
-                         std::string instance = m_SettingsDialog->GetInstanceURL();
+                         instance = m_SettingsDialog->GetInstanceURL();
 
                          json_object* obj = json_object_new_object();
                          json_object_object_add(obj, "server", json_object_new_string(instance.c_str()));
@@ -330,6 +349,14 @@ void App::Run() {
                     }
 
                     ShowMain();
+
+                    // Bind the instance to the API and load the public timeline
+                    // for the unauthenticated browsing flow. Token stays empty;
+                    // the user can still log in afterwards from the menu.
+                    if (!instance.empty()) {
+                        m_API->SetCredentials(instance, "");
+                        m_MainWindow->FetchTimeline();
+                    }
                 }
                 break;
         }
@@ -340,17 +367,20 @@ void App::Run() {
             AMIDON_FD_ZERO(&writeFds);
             int nfds = m_AsyncHttp ? m_AsyncHttp->GetSelectFdSets(&readFds, &writeFds) : 0;
 
-            if (signals || nfds > 0) {
+            if (nfds > 0) {
                 struct timeval tv;
                 tv.tv_sec = 0;
                 tv.tv_usec = 100000;
-                int sel = WaitSelect(nfds > 0 ? nfds : 0,
+                int sel = WaitSelect(nfds,
                     (APTR)&readFds, (APTR)&writeFds, NULL, &tv, &signals);
                 if (sel > 0) {
                     if (m_AsyncHttp) {
                         m_AsyncHttp->Progress();
                     }
                 }
+                if (signals & SIGBREAKF_CTRL_C) break;
+            } else if (signals) {
+                Wait(signals);
                 if (signals & SIGBREAKF_CTRL_C) break;
             }
         }
@@ -382,6 +412,28 @@ void App::ShowSettings() {
         m_SettingsDialog->InitNotifications(m_App);
     }
     SetAttrs(m_SettingsDialog->GetMUIObject(), MUIA_Window_Open, TRUE, TAG_DONE);
+}
+
+void App::DownloadAvatar(const std::string& instance, const std::string& url,
+                          std::function<void(const std::string& path)> done) {
+    if (!m_AsyncHttp || url.empty()) {
+        if (done) done("");
+        return;
+    }
+
+    fprintf(stderr, "DEBUG: DownloadAvatar url=%s\n", url.c_str());
+    m_AsyncHttp->Get(url, "", [instance, done](const std::string& body, long code) {
+        if (code != 200 || body.empty()) {
+            fprintf(stderr, "DEBUG: DownloadAvatar failed code=%ld len=%zu\n", code, body.length());
+            if (done) done("");
+            return;
+        }
+        if (!CacheManager::WriteAvatarFile(instance, body)) {
+            if (done) done("");
+            return;
+        }
+        if (done) done(CacheManager::GetAvatarPath(instance));
+    });
 }
 
 void App::ShowLogin() {

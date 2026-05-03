@@ -6,7 +6,6 @@
 #ifndef MASTODON_API_H
 #define MASTODON_API_H
 
-#include "HttpClient.h"
 #include "AsyncHttpService.h"
 #include "logic/MastodonTypes.h"
 
@@ -41,7 +40,6 @@ public:
 private:
     std::string m_InstanceURL;
     std::string m_AccessToken;
-    HttpClient m_Client;
     AsyncHttpService* m_AsyncHttp;
 };
 

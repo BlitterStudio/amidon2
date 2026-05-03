@@ -22,7 +22,10 @@ public:
     static bool LoadToken(const std::string& instance, std::string& access_token);
     
     // Avatar management
-    static bool SaveAvatar(const std::string& instance, const std::string& avatarUrl);
+    // Write already-downloaded avatar bytes to the cache. The HTTP fetch
+    // itself lives in App (which owns the async HTTP service) so that the
+    // download is non-blocking.
+    static bool WriteAvatarFile(const std::string& instance, const std::string& bytes);
     static std::string GetAvatarPath(const std::string& instance);
     
 private:

@@ -337,18 +337,17 @@ void MainWindow::SetAccountInfo(const std::string& username, const std::string& 
     
     // Set avatar
     if (m_ImageAvatar && !avatarPath.empty()) {
-        static std::string s_avatarSpec; // Keep alive for MUI
-        s_avatarSpec = avatarPath;
-        
+        // Heap-allocated and intentionally never freed: avoids running a
+        // std::string destructor during C++ global teardown.
+        static std::string* s_avatarSpec = new std::string;
+        *s_avatarSpec = "PROGDIR:" + avatarPath;
+
         if (m_UseGuigfx) {
-            s_avatarSpec = "PROGDIR:" + avatarPath;
-            printf("DEBUG: Setting avatar spec (Guigfx): '%s'\n", s_avatarSpec.c_str());
-            SetAttrs(m_ImageAvatar, MUIA_Guigfx_FileName, (IPTR)s_avatarSpec.c_str(), TAG_DONE);
+            printf("DEBUG: Setting avatar spec (Guigfx): '%s'\n", s_avatarSpec->c_str());
+            SetAttrs(m_ImageAvatar, MUIA_Guigfx_FileName, (IPTR)s_avatarSpec->c_str(), TAG_DONE);
         } else {
-            // Restore PROGDIR prefix for Dtpic if needed
-            s_avatarSpec = "PROGDIR:" + avatarPath;
-            printf("DEBUG: Setting avatar spec (Dtpic): '%s'\n", s_avatarSpec.c_str());
-            SetAttrs(m_ImageAvatar, MUIA_Dtpic_Name, (IPTR)s_avatarSpec.c_str(), TAG_DONE);
+            printf("DEBUG: Setting avatar spec (Dtpic): '%s'\n", s_avatarSpec->c_str());
+            SetAttrs(m_ImageAvatar, MUIA_Dtpic_Name, (IPTR)s_avatarSpec->c_str(), TAG_DONE);
         }
     }
     
@@ -376,10 +375,12 @@ void MainWindow::ShowToot(int index) {
 
     const Status& status = m_TimelineData[index];
 
-    static std::string s_html;
-    s_html = TootFormatter::FormatToot(status);
+    // Heap-allocated and intentionally never freed: avoids running a
+    // std::string destructor during C++ global teardown.
+    static std::string* s_html = new std::string;
+    *s_html = TootFormatter::FormatToot(status);
 
-    SetAttrs(m_Htmlview, MUIA_HTMLview_Contents, (IPTR)s_html.c_str(), TAG_DONE);
+    SetAttrs(m_Htmlview, MUIA_HTMLview_Contents, (IPTR)s_html->c_str(), TAG_DONE);
 }
 
 Object* MainWindow::CreateNotificationsPage() {

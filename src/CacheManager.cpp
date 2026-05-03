@@ -1,5 +1,4 @@
 #include "CacheManager.h"
-#include "HttpClient.h"
 #include "logic/CredsParser.h"
 
 extern "C" {
@@ -207,9 +206,9 @@ bool CacheManager::LoadToken(const std::string& instance, std::string& access_to
     return false;
 }
 
-bool CacheManager::SaveAvatar(const std::string& instance, const std::string& avatarUrl) {
-    if (avatarUrl.empty()) {
-        fprintf(stderr, "WARNING: Avatar URL is empty, skipping download\n");
+bool CacheManager::WriteAvatarFile(const std::string& instance, const std::string& bytes) {
+    if (bytes.empty()) {
+        fprintf(stderr, "WARNING: Avatar bytes are empty, skipping write\n");
         return false;
     }
 
@@ -218,28 +217,13 @@ bool CacheManager::SaveAvatar(const std::string& instance, const std::string& av
     }
 
     std::string avatarPath = GetAvatarPath(instance);
-
-    printf("Downloading avatar from: %s\n", avatarUrl.c_str());
-    printf("Saving to: %s\n", avatarPath.c_str());
-
-    HttpClient client;
-    bool success = false;
-
-    client.Get(avatarUrl, [&avatarPath, &success](const std::string& response, long code) {
-        if (code == 200) {
-            FILE* f = fopen(avatarPath.c_str(), "wb");
-            if (f) {
-                fwrite(response.c_str(), 1, response.length(), f);
-                fclose(f);
-                printf("Avatar saved successfully\n");
-                success = true;
-            } else {
-                fprintf(stderr, "ERROR: Failed to open avatar file for writing: %s\n", avatarPath.c_str());
-            }
-        } else {
-            fprintf(stderr, "ERROR: Failed to download avatar, HTTP code: %ld\n", code);
-        }
-    });
-
-    return success;
+    FILE* f = fopen(avatarPath.c_str(), "wb");
+    if (!f) {
+        fprintf(stderr, "ERROR: Failed to open avatar file for writing: %s\n", avatarPath.c_str());
+        return false;
+    }
+    fwrite(bytes.c_str(), 1, bytes.length(), f);
+    fclose(f);
+    printf("DEBUG: Avatar saved to %s (%zu bytes)\n", avatarPath.c_str(), bytes.length());
+    return true;
 }

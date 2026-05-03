@@ -136,6 +136,7 @@ private:
     void* m_SSL;
     bool m_SSLInitialized;
     int m_SSLWant;  // 0=none, SSL_ERROR_WANT_READ, SSL_ERROR_WANT_WRITE
+    int m_ErrNo;    // ErrNo storage for AmiSSL — must outlive DoConnect() stack frame
 
     // Send/receive buffers
     std::string m_SendBuffer;

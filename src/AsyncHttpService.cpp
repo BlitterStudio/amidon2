@@ -30,6 +30,7 @@ bool AsyncHttpService::IsBusy() const {
 
 void AsyncHttpService::Get(const std::string& url, const std::string& authHeader,
                              HttpCallback callback) {
+    fprintf(stderr, "DEBUG: AsyncHttp::Get url=%s\n", url.c_str());
     QueuedRequest req;
     req.method = "GET";
     req.url = url;
@@ -46,11 +47,14 @@ void AsyncHttpService::Get(const std::string& url, const std::string& authHeader
     m_CurrentRequest = std::make_unique<HttpRequest>(
         "GET", url, authHeader, "", "", callback);
 
+    fprintf(stderr, "DEBUG: AsyncHttp::Get calling Start()\n");
     if (!m_CurrentRequest->Start()) {
+        fprintf(stderr, "DEBUG: AsyncHttp::Get Start() failed\n");
         if (callback) callback("", 0);
         FinishCurrent();
         return;
     }
+    fprintf(stderr, "DEBUG: AsyncHttp::Get Start() ok state=%d\n", m_CurrentRequest->GetState());
 }
 
 void AsyncHttpService::Post(const std::string& url, const std::string& payload,
@@ -120,18 +124,27 @@ void AsyncHttpService::StartNext() {
 void AsyncHttpService::FinishCurrent() {
     if (!m_CurrentRequest) return;
 
-    if (m_CurrentRequest->GetState() == HttpRequest::STATE_DONE) {
-        HttpCallback cb = m_CurrentRequest->GetCallback();
+    // Move the finished request out before firing its callback so a new
+    // request started inside the callback (which sees IsBusy() == false
+    // because the finished request reports IsFinished() == true) doesn't
+    // get clobbered by m_CurrentRequest.reset() on the way back.
+    std::unique_ptr<HttpRequest> finished = std::move(m_CurrentRequest);
+
+    if (finished->GetState() == HttpRequest::STATE_DONE) {
+        HttpCallback cb = finished->GetCallback();
         if (cb) {
-            cb(m_CurrentRequest->GetResponseBody(), m_CurrentRequest->GetResponseCode());
+            cb(finished->GetResponseBody(), finished->GetResponseCode());
         }
-    } else if (m_CurrentRequest->GetState() == HttpRequest::STATE_ERROR) {
-        HttpCallback cb = m_CurrentRequest->GetCallback();
+    } else if (finished->GetState() == HttpRequest::STATE_ERROR) {
+        HttpCallback cb = finished->GetCallback();
         if (cb) {
             cb("", 0);
         }
     }
 
-    m_CurrentRequest.reset();
-    StartNext();
+    // 'finished' destructs at end of scope, closing its socket / SSL.
+    // Only drain the queue if the callback didn't already start something.
+    if (!m_CurrentRequest) {
+        StartNext();
+    }
 }

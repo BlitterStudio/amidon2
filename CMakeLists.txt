@@ -59,7 +59,6 @@ set(SOURCES
     src/ui/SettingsDialog.cpp
     src/ui/LoginDialog.cpp
     src/MastodonAPI.cpp
-    src/HttpClient.cpp
     src/CacheManager.cpp
     src/AsyncHttpService.cpp
     src/HttpRequest.cpp

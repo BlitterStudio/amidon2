@@ -9,6 +9,7 @@
 #include <libraries/mui.h>
 #include <string>
 #include <memory>
+#include <functional>
 
 #include "MastodonAPI.h"
 #include "AsyncHttpService.h"
@@ -48,6 +49,12 @@ private:
     void ShowMain();
     void ShowSettings();
     void ShowLogin();
+
+    // Async avatar download. Fires callback with the local file path on
+    // success, or an empty string on failure. No-op (callback fires with
+    // empty path) if AsyncHttp isn't available or the URL is empty.
+    void DownloadAvatar(const std::string& instance, const std::string& url,
+                        std::function<void(const std::string& path)> done);
 };
 
 #include "Constants.h"

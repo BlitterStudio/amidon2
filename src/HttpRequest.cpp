@@ -146,7 +146,7 @@ HttpRequest::HttpRequest(const std::string& method, const std::string& url,
       m_SocketFd(-1), m_State(STATE_IDLE),
       m_AmiSSLBase(NULL), m_AmiSSLMasterBase(NULL),
       m_SSLCtx(NULL), m_SSL(NULL), m_SSLInitialized(false),
-      m_SSLWant(0), m_SendOffset(0), m_ResponseCode(0),
+      m_SSLWant(0), m_ErrNo(0), m_SendOffset(0), m_ResponseCode(0),
       m_Chunked(false), m_ContentLength(-1), m_ConnectionClose(false),
       m_RedirectCount(0) {
 }
@@ -209,6 +209,7 @@ bool HttpRequest::Start() {
 }
 
 bool HttpRequest::Progress() {
+    fprintf(stderr, "DEBUG: Progress state=%d\n", m_State);
     switch (m_State) {
         case STATE_CONNECTING:
             return DoConnect();
@@ -340,14 +341,17 @@ int HttpRequest::GetSocketError(int fd) {
 }
 
 bool HttpRequest::DoConnect() {
+    fprintf(stderr, "DEBUG: DoConnect state=%d\n", m_State);
     int err = GetSocketError(m_SocketFd);
     if (err != 0) {
+        fprintf(stderr, "DEBUG: Connect error=%d\n", err);
         CloseConn();
         m_State = STATE_ERROR;
         return false;
     }
 
     if (m_IsHttps) {
+        fprintf(stderr, "DEBUG: Opening amisslmaster.library\n");
         m_AmiSSLMasterBase = OpenLibrary((STRPTR)"amisslmaster.library", AMISSLMASTER_MIN_VERSION);
         if (!m_AmiSSLMasterBase) {
             SetError("amisslmaster.library open failed");
@@ -357,6 +361,7 @@ bool HttpRequest::DoConnect() {
         struct Library* savedASBase = NULL;
         struct Library* savedAMSBase = m_AmiSSLMasterBase;
 
+        fprintf(stderr, "DEBUG: InitAmiSSLMaster\n");
         SET_AMISSL_BASES(savedASBase, savedAMSBase);
         if (!InitAmiSSLMaster(AMISSL_CURRENT_VERSION, TRUE)) {
             CloseLibrary(m_AmiSSLMasterBase);
@@ -365,6 +370,7 @@ bool HttpRequest::DoConnect() {
             return false;
         }
 
+        fprintf(stderr, "DEBUG: OpenAmiSSL\n");
         SET_AMISSL_BASES(savedASBase, savedAMSBase);
         m_AmiSSLBase = OpenAmiSSL();
         if (!m_AmiSSLBase) {
@@ -374,9 +380,10 @@ bool HttpRequest::DoConnect() {
             return false;
         }
 
-        int sniErrno = 0;
+        fprintf(stderr, "DEBUG: InitAmiSSLA\n");
+        m_ErrNo = 0;
         struct TagItem initTags[] = {
-            { AmiSSL_ErrNoPtr, (ULONG)&sniErrno },
+            { AmiSSL_ErrNoPtr, (ULONG)&m_ErrNo },
             { AmiSSL_SocketBase, (ULONG)SocketBase },
             { TAG_DONE, 0 }
         };
@@ -392,9 +399,11 @@ bool HttpRequest::DoConnect() {
         }
         m_SSLInitialized = true;
 
+        fprintf(stderr, "DEBUG: OPENSSL_init_ssl\n");
         SET_AMISSL_BASES(m_AmiSSLBase, m_AmiSSLMasterBase);
         OPENSSL_init_ssl(OPENSSL_INIT_SSL_DEFAULT | OPENSSL_INIT_ADD_ALL_CIPHERS | OPENSSL_INIT_ADD_ALL_DIGESTS, NULL);
 
+        fprintf(stderr, "DEBUG: RAND_seed\n");
         SET_AMISSL_BASES(m_AmiSSLBase, m_AmiSSLMasterBase);
         {
             unsigned char seed[32];
@@ -404,6 +413,7 @@ bool HttpRequest::DoConnect() {
             RAND_seed(seed, sizeof(seed));
         }
 
+        fprintf(stderr, "DEBUG: SSL_CTX_new\n");
         SET_AMISSL_BASES(m_AmiSSLBase, m_AmiSSLMasterBase);
         m_SSLCtx = SSL_CTX_new(TLS_client_method());
         if (!m_SSLCtx) {
@@ -423,6 +433,7 @@ bool HttpRequest::DoConnect() {
             SSL_CTX_set_verify((SSL_CTX*)m_SSLCtx, SSL_VERIFY_NONE, NULL);
         }
 
+        fprintf(stderr, "DEBUG: SSL_new\n");
         SET_AMISSL_BASES(m_AmiSSLBase, m_AmiSSLMasterBase);
         m_SSL = SSL_new((SSL_CTX*)m_SSLCtx);
         if (!m_SSL) {
@@ -430,6 +441,7 @@ bool HttpRequest::DoConnect() {
             return false;
         }
 
+        fprintf(stderr, "DEBUG: SSL_set_fd\n");
         SET_AMISSL_BASES(m_AmiSSLBase, m_AmiSSLMasterBase);
         SSL_set_fd((SSL*)m_SSL, m_SocketFd);
         SSL_set_tlsext_host_name((SSL*)m_SSL, m_Host.c_str());
@@ -440,11 +452,13 @@ bool HttpRequest::DoConnect() {
             SSL_set1_host((SSL*)m_SSL, m_Host.c_str());
         }
 
+        fprintf(stderr, "DEBUG: SSL_connect starting\n");
         m_State = STATE_TLS_HANDSHAKE;
         m_SSLWant = SSL_ERROR_WANT_WRITE;
         return DoTlsHandshake();
     }
 
+    fprintf(stderr, "DEBUG: HTTP (no TLS) sending request\n");
     m_SendBuffer = BuildRequest();
     m_SendOffset = 0;
     m_ResponseHeaders.clear();
@@ -456,10 +470,12 @@ bool HttpRequest::DoConnect() {
 
 bool HttpRequest::DoTlsHandshake() {
     SET_AMISSL_BASES(m_AmiSSLBase, m_AmiSSLMasterBase);
+    fprintf(stderr, "DEBUG: SSL_connect\n");
     int ret = SSL_connect((SSL*)m_SSL);
 
     if (ret == 1) {
         m_SSLWant = 0;
+        fprintf(stderr, "DEBUG: TLS connected, sending request\n");
         m_SendBuffer = BuildRequest();
         m_SendOffset = 0;
         m_ResponseHeaders.clear();
