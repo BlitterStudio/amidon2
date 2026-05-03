@@ -8,26 +8,13 @@
 
 extern "C" {
 #include <exec/types.h>
-#include <exec/ports.h>
 }
 
-#include "HttpClient.h"
+#include "HttpRequest.h"
 
 #include <string>
 #include <vector>
-
-struct AsyncHttpWork {
-    struct Message msg;
-    char* url;
-    char* method;
-    char* payload;
-    char* authHeader;
-    char* contentType;
-    char* responseBody;
-    long responseCode;
-    int success;
-    struct MsgPort* replyPort;
-};
+#include <memory>
 
 class AsyncHttpService {
 public:
@@ -36,7 +23,7 @@ public:
 
     bool Init();
     void Shutdown();
-    ULONG SignalMask() const;
+
     bool IsBusy() const;
 
     void Get(const std::string& url, const std::string& authHeader, HttpCallback callback);
@@ -44,19 +31,26 @@ public:
               const std::string& authHeader, const std::string& contentType,
               HttpCallback callback);
 
-    void HandleCompletion();
+    /*
+     * Advance the active request's state machine.
+     * Call from the MUI event loop when WaitSelect reports
+     * the socket is ready.
+     */
+    void Progress();
+
+    /*
+     * Build a WaitSelect-compatible signal mask.
+     * Returns the socket fd if a request is active and needs
+     * WaitSelect attention, or -1 if idle.
+     * Populates readfds/writefds based on the request's current state.
+     */
+    int GetSelectFdSets(fd_set* readfds, fd_set* writefds) const;
 
 private:
-    bool StartRequest(const char* method, const char* url, const char* payload,
-                      const char* authHeader, const char* contentType,
-                      HttpCallback callback);
-    void ProcessQueue();
+    void StartNext();
+    void FinishCurrent();
 
-    struct MsgPort* m_ReplyPort;
-    ULONG m_ReplySig;
-    bool m_Busy;
-    HttpCallback m_Callback;
-    AsyncHttpWork* m_CurrentWork;
+    std::unique_ptr<HttpRequest> m_CurrentRequest;
 
     struct QueuedRequest {
         std::string method;
