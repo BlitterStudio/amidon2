@@ -146,7 +146,7 @@ HttpRequest::HttpRequest(const std::string& method, const std::string& url,
       m_SocketFd(-1), m_State(STATE_IDLE),
       m_AmiSSLBase(NULL), m_AmiSSLMasterBase(NULL),
       m_SSLCtx(NULL), m_SSL(NULL), m_SSLInitialized(false),
-      m_SendOffset(0), m_ResponseCode(0),
+      m_SSLWant(0), m_SendOffset(0), m_ResponseCode(0),
       m_Chunked(false), m_ContentLength(-1), m_ConnectionClose(false),
       m_RedirectCount(0) {
 }
@@ -253,24 +253,29 @@ int HttpRequest::GetSelectFdSets(void* readfdsVoid, void* writefdsVoid) const {
 
     switch (m_State) {
         case STATE_CONNECTING:
-        case STATE_SENDING:
             AMIDON_FD_SET(m_SocketFd, writefds);
             break;
-        case STATE_TLS_HANDSHAKE:
-            if (m_SSL) {
-                int sslErr = SSL_get_error((SSL*)m_SSL, 0);
-                if (sslErr == SSL_ERROR_WANT_WRITE) {
-                    AMIDON_FD_SET(m_SocketFd, writefds);
-                } else {
-                    AMIDON_FD_SET(m_SocketFd, readfds);
-                }
+        case STATE_SENDING:
+            if (m_IsHttps && m_SSL && m_SSLWant == SSL_ERROR_WANT_READ) {
+                AMIDON_FD_SET(m_SocketFd, readfds);
             } else {
                 AMIDON_FD_SET(m_SocketFd, writefds);
             }
             break;
+        case STATE_TLS_HANDSHAKE:
+            if (m_SSLWant == SSL_ERROR_WANT_WRITE) {
+                AMIDON_FD_SET(m_SocketFd, writefds);
+            } else {
+                AMIDON_FD_SET(m_SocketFd, readfds);
+            }
+            break;
         case STATE_RECV_HEADERS:
         case STATE_RECV_BODY:
-            AMIDON_FD_SET(m_SocketFd, readfds);
+            if (m_IsHttps && m_SSL && m_SSLWant == SSL_ERROR_WANT_WRITE) {
+                AMIDON_FD_SET(m_SocketFd, writefds);
+            } else {
+                AMIDON_FD_SET(m_SocketFd, readfds);
+            }
             break;
         default:
             return 0;
@@ -436,6 +441,7 @@ bool HttpRequest::DoConnect() {
         }
 
         m_State = STATE_TLS_HANDSHAKE;
+        m_SSLWant = SSL_ERROR_WANT_WRITE;
         return DoTlsHandshake();
     }
 
@@ -444,6 +450,7 @@ bool HttpRequest::DoConnect() {
     m_ResponseHeaders.clear();
     m_ResponseBody.clear();
     m_State = STATE_SENDING;
+    m_SSLWant = 0;
     return DoSend();
 }
 
@@ -494,7 +501,7 @@ bool HttpRequest::DoSend() {
                 return false;
             }
         } else {
-sent = send(m_SocketFd, (APTR)data, (int)remaining, 0);
+            sent = send(m_SocketFd, (APTR)data, (int)remaining, 0);
             if (sent <= 0) {
                 int err = Errno();
                 if (err == EWOULDBLOCK || err == EAGAIN) {
@@ -504,6 +511,9 @@ sent = send(m_SocketFd, (APTR)data, (int)remaining, 0);
                 return false;
             }
         }
+        m_SendOffset += sent;
+        data = m_SendBuffer.data() + m_SendOffset;
+        remaining = m_SendBuffer.size() - m_SendOffset;
     }
 
     if (!m_Body.empty()) {
@@ -548,6 +558,7 @@ sent = send(m_SocketFd, (APTR)data, (int)remaining, 0);
     m_ResponseHeaders.clear();
     m_ResponseBody.clear();
     m_State = STATE_RECV_HEADERS;
+    m_SSLWant = SSL_ERROR_WANT_READ;
     return true;
 }
 
@@ -625,6 +636,7 @@ bool HttpRequest::DoRecvHeaders() {
                                  strstr(hdrStr, "connection: close") != NULL);
 
             m_State = STATE_RECV_BODY;
+            m_SSLWant = SSL_ERROR_WANT_READ;
             return true;
         }
 
