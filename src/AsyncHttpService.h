@@ -44,7 +44,7 @@ public:
      * WaitSelect attention, or -1 if idle.
      * Populates readfds/writefds based on the request's current state.
      */
-    int GetSelectFdSets(fd_set* readfds, fd_set* writefds) const;
+    int GetSelectFdSets(void* readfds, void* writefds) const;
 
 private:
     void StartNext();

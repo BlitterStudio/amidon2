@@ -54,6 +54,8 @@ public:
     State GetState() const { return m_State; }
     bool IsFinished() const { return m_State == STATE_DONE || m_State == STATE_ERROR; }
     long GetResponseCode() const { return m_ResponseCode; }
+    const std::string& GetResponseBody() const { return m_ResponseBody; }
+    HttpCallback GetCallback() const { return m_Callback; }
 
     /*
      * Start the request. Performs blocking DNS (gethostbyname),
@@ -89,11 +91,11 @@ public:
      * Returns the nfds value (max fd + 1) for WaitSelect.
      * Returns 0 if no socket is active.
      */
-    int GetSelectFdSets(fd_set* readfds, fd_set* writefds) const;
+    int GetSelectFdSets(void* readfds, void* writefds) const;
 
 private:
     void SetError(const char* context);
-    void CloseSocket();
+    void CloseConn();
     void CloseSSL();
 
     bool DoConnect();

@@ -62,6 +62,7 @@ set(SOURCES
     src/HttpClient.cpp
     src/CacheManager.cpp
     src/AsyncHttpService.cpp
+    src/HttpRequest.cpp
     # Logic (platform-free)
     src/logic/TimelineParser.cpp
     src/logic/AccountParser.cpp

@@ -13,6 +13,7 @@
 #include "logic/UrlBuilder.h"
 
 #include "ui/MUIHelpers.h"
+#include "FdSetCompat.h"
 extern "C" {
 #include <proto/exec.h>
 #include <proto/intuition.h>
@@ -20,6 +21,7 @@ extern "C" {
 #include <proto/graphics.h>
 #include <proto/datatypes.h>
 #include <proto/utility.h>
+#include <proto/socket.h>
 #include <clib/alib_protos.h>
 }
 
@@ -136,6 +138,10 @@ void App::Run() {
     if (!m_AsyncHttp->Init()) {
         fprintf(stderr, "WARNING: AsyncHttpService init failed\n");
         m_AsyncHttp.reset();
+    }
+
+    if (m_AsyncHttp) {
+        m_API->SetAsyncHttp(m_AsyncHttp.get());
     }
 
     bool useGuigfx = false;
@@ -328,12 +334,24 @@ void App::Run() {
                 break;
         }
 
-        if (m_Running && signals) {
-            ULONG asyncSig = m_AsyncHttp ? m_AsyncHttp->SignalMask() : 0;
-            signals = Wait(signals | asyncSig | SIGBREAKF_CTRL_C);
-            if (signals & SIGBREAKF_CTRL_C) break;
-            if ((signals & asyncSig) && m_AsyncHttp) {
-                m_AsyncHttp->HandleCompletion();
+        if (m_Running) {
+            amidon_fd_set readFds, writeFds;
+            AMIDON_FD_ZERO(&readFds);
+            AMIDON_FD_ZERO(&writeFds);
+            int nfds = m_AsyncHttp ? m_AsyncHttp->GetSelectFdSets(&readFds, &writeFds) : 0;
+
+            if (signals || nfds > 0) {
+                struct timeval tv;
+                tv.tv_sec = 0;
+                tv.tv_usec = 100000;
+                int sel = WaitSelect(nfds > 0 ? nfds : 0,
+                    (APTR)&readFds, (APTR)&writeFds, NULL, &tv, &signals);
+                if (sel > 0) {
+                    if (m_AsyncHttp) {
+                        m_AsyncHttp->Progress();
+                    }
+                }
+                if (signals & SIGBREAKF_CTRL_C) break;
             }
         }
     }

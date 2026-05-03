@@ -7,6 +7,14 @@
  */
 
 #include "HttpRequest.h"
+#include "FdSetCompat.h"
+
+#include <sys/filio.h>
+#include <sys/types.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <errno.h>
 
 extern "C" {
 #include <proto/exec.h>
@@ -18,12 +26,6 @@ extern "C" {
 #include <libraries/amisslmaster.h>
 #include <libraries/amissl.h>
 #include <amissl/amissl.h>
-#include <sys/filio.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <arpa/inet.h>
 }
 
 #include <cstdio>
@@ -151,7 +153,7 @@ HttpRequest::HttpRequest(const std::string& method, const std::string& url,
 
 HttpRequest::~HttpRequest() {
     CloseSSL();
-    CloseSocket();
+    CloseConn();
 }
 
 bool HttpRequest::Start() {
@@ -177,7 +179,7 @@ bool HttpRequest::Start() {
         }
 
         if (!SetNonBlocking(m_SocketFd)) {
-            CloseSocket();
+            CloseConn();
             m_State = STATE_ERROR;
             return false;
         }
@@ -192,7 +194,7 @@ bool HttpRequest::Start() {
         if (ret < 0) {
             int err = Errno();
             if (err != EINPROGRESS && err != EWOULDBLOCK) {
-                CloseSocket();
+                CloseConn();
                 m_State = STATE_ERROR;
                 return false;
             }
@@ -240,32 +242,35 @@ bool HttpRequest::NeedsWrite() const {
     }
 }
 
-int HttpRequest::GetSelectFdSets(fd_set* readfds, fd_set* writefds) const {
+int HttpRequest::GetSelectFdSets(void* readfdsVoid, void* writefdsVoid) const {
     if (m_SocketFd < 0 || IsFinished()) return 0;
 
-    FD_ZERO(readfds);
-    FD_ZERO(writefds);
+    amidon_fd_set* readfds = static_cast<amidon_fd_set*>(readfdsVoid);
+    amidon_fd_set* writefds = static_cast<amidon_fd_set*>(writefdsVoid);
+
+    AMIDON_FD_ZERO(readfds);
+    AMIDON_FD_ZERO(writefds);
 
     switch (m_State) {
         case STATE_CONNECTING:
         case STATE_SENDING:
-            FD_SET(m_SocketFd, writefds);
+            AMIDON_FD_SET(m_SocketFd, writefds);
             break;
         case STATE_TLS_HANDSHAKE:
             if (m_SSL) {
                 int sslErr = SSL_get_error((SSL*)m_SSL, 0);
                 if (sslErr == SSL_ERROR_WANT_WRITE) {
-                    FD_SET(m_SocketFd, writefds);
+                    AMIDON_FD_SET(m_SocketFd, writefds);
                 } else {
-                    FD_SET(m_SocketFd, readfds);
+                    AMIDON_FD_SET(m_SocketFd, readfds);
                 }
             } else {
-                FD_SET(m_SocketFd, writefds);
+                AMIDON_FD_SET(m_SocketFd, writefds);
             }
             break;
         case STATE_RECV_HEADERS:
         case STATE_RECV_BODY:
-            FD_SET(m_SocketFd, readfds);
+            AMIDON_FD_SET(m_SocketFd, readfds);
             break;
         default:
             return 0;
@@ -277,14 +282,15 @@ int HttpRequest::GetSelectFdSets(fd_set* readfds, fd_set* writefds) const {
 void HttpRequest::SetError(const char* context) {
     fprintf(stderr, "HttpRequest error: %s (state=%d)\n", context, m_State);
     CloseSSL();
-    CloseSocket();
+    CloseConn();
     m_State = STATE_ERROR;
 }
 
-void HttpRequest::CloseSocket() {
+void HttpRequest::CloseConn() {
     if (m_SocketFd >= 0) {
-        CloseSocket(m_SocketFd);
+        LONG fd = m_SocketFd;
         m_SocketFd = -1;
+        CloseSocket(fd);
     }
 }
 
@@ -324,14 +330,14 @@ bool HttpRequest::SetNonBlocking(int fd) {
 int HttpRequest::GetSocketError(int fd) {
     int err = 0;
     LONG len = sizeof(err);
-    getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len);
+    getsockopt(fd, SOL_SOCKET, SO_ERROR, (char*)&err, (socklen_t*)&len);
     return err;
 }
 
 bool HttpRequest::DoConnect() {
     int err = GetSocketError(m_SocketFd);
     if (err != 0) {
-        CloseSocket();
+        CloseConn();
         m_State = STATE_ERROR;
         return false;
     }
@@ -439,4 +445,312 @@ bool HttpRequest::DoConnect() {
     m_ResponseBody.clear();
     m_State = STATE_SENDING;
     return DoSend();
+}
+
+bool HttpRequest::DoTlsHandshake() {
+    SET_AMISSL_BASES(m_AmiSSLBase, m_AmiSSLMasterBase);
+    int ret = SSL_connect((SSL*)m_SSL);
+
+    if (ret == 1) {
+        m_SSLWant = 0;
+        m_SendBuffer = BuildRequest();
+        m_SendOffset = 0;
+        m_ResponseHeaders.clear();
+        m_ResponseBody.clear();
+        m_State = STATE_SENDING;
+        return true;
+    }
+
+    int sslErr = SSL_get_error((SSL*)m_SSL, ret);
+    if (sslErr == SSL_ERROR_WANT_READ) {
+        m_SSLWant = SSL_ERROR_WANT_READ;
+        return true;
+    }
+    if (sslErr == SSL_ERROR_WANT_WRITE) {
+        m_SSLWant = SSL_ERROR_WANT_WRITE;
+        return true;
+    }
+
+    SetError("SSL_connect failed");
+    return false;
+}
+
+bool HttpRequest::DoSend() {
+    const char* data = m_SendBuffer.data() + m_SendOffset;
+    size_t remaining = m_SendBuffer.size() - m_SendOffset;
+
+    while (remaining > 0) {
+        int sent;
+        if (m_IsHttps && m_SSL) {
+            SET_AMISSL_BASES(m_AmiSSLBase, m_AmiSSLMasterBase);
+            sent = SSL_write((SSL*)m_SSL, data, (int)remaining);
+            if (sent <= 0) {
+                int sslErr = SSL_get_error((SSL*)m_SSL, sent);
+                if (sslErr == SSL_ERROR_WANT_READ || sslErr == SSL_ERROR_WANT_WRITE) {
+                    m_SSLWant = sslErr;
+                    return true;
+                }
+                SetError("SSL_write failed during send");
+                return false;
+            }
+        } else {
+sent = send(m_SocketFd, (APTR)data, (int)remaining, 0);
+            if (sent <= 0) {
+                int err = Errno();
+                if (err == EWOULDBLOCK || err == EAGAIN) {
+                    return true;
+                }
+                SetError("send() failed");
+                return false;
+            }
+        }
+    }
+
+    if (!m_Body.empty()) {
+        m_SendBuffer = m_Body;
+        m_SendOffset = 0;
+        size_t bodyRemaining = m_SendBuffer.size();
+        const char* bodyData = m_SendBuffer.data();
+
+        while (bodyRemaining > 0) {
+            int sent;
+            if (m_IsHttps && m_SSL) {
+                SET_AMISSL_BASES(m_AmiSSLBase, m_AmiSSLMasterBase);
+                sent = SSL_write((SSL*)m_SSL, bodyData, (int)bodyRemaining);
+                if (sent <= 0) {
+                    int sslErr = SSL_get_error((SSL*)m_SSL, sent);
+                    if (sslErr == SSL_ERROR_WANT_READ || sslErr == SSL_ERROR_WANT_WRITE) {
+                        m_SendOffset = bodyData - m_SendBuffer.data();
+                        m_SSLWant = sslErr;
+                        return true;
+                    }
+                    SetError("SSL_write failed during body send");
+                    return false;
+                }
+            } else {
+                sent = send(m_SocketFd, (APTR)bodyData, (int)bodyRemaining, 0);
+                if (sent <= 0) {
+                    int err = Errno();
+                    if (err == EWOULDBLOCK || err == EAGAIN) {
+                        return true;
+                    }
+                    SetError("send() failed during body");
+                    return false;
+                }
+            }
+            bodyData += sent;
+            bodyRemaining -= sent;
+        }
+    }
+
+    m_RecvBuffer.resize(16384);
+    m_RecvOffset = 0;
+    m_ResponseHeaders.clear();
+    m_ResponseBody.clear();
+    m_State = STATE_RECV_HEADERS;
+    return true;
+}
+
+bool HttpRequest::DoRecvHeaders() {
+    while (true) {
+        int got;
+        if (m_IsHttps && m_SSL) {
+            SET_AMISSL_BASES(m_AmiSSLBase, m_AmiSSLMasterBase);
+            got = SSL_read((SSL*)m_SSL, m_RecvBuffer.data(), (int)m_RecvBuffer.size());
+            if (got <= 0) {
+                int sslErr = SSL_get_error((SSL*)m_SSL, got);
+                if (sslErr == SSL_ERROR_WANT_READ || sslErr == SSL_ERROR_WANT_WRITE) {
+                    m_SSLWant = sslErr;
+                    return true;
+                }
+                if (sslErr == SSL_ERROR_ZERO_RETURN || sslErr == SSL_ERROR_SYSCALL) {
+                    // Connection closed by server
+                    break;
+                }
+                SetError("SSL_read failed during headers");
+                return false;
+            }
+        } else {
+            got = recv(m_SocketFd, m_RecvBuffer.data(), (int)m_RecvBuffer.size(), 0);
+            if (got <= 0) {
+                if (got < 0) {
+                    int err = Errno();
+                    if (err == EWOULDBLOCK || err == EAGAIN) {
+                        return true;
+                    }
+                    SetError("recv() failed during headers");
+                    return false;
+                }
+                break;
+            }
+        }
+
+        m_ResponseHeaders.append(m_RecvBuffer.data(), got);
+
+        const char* hdrEnd = strstr(m_ResponseHeaders.c_str(), "\r\n\r\n");
+        if (hdrEnd) {
+            int headerBlockSize = (int)(hdrEnd - m_ResponseHeaders.c_str()) + 4;
+            int bodyAlready = m_ResponseHeaders.size() - headerBlockSize;
+            if (bodyAlready > 0) {
+                m_ResponseBody.append(hdrEnd + 4, bodyAlready);
+            }
+
+            const char* hdrStr = m_ResponseHeaders.c_str();
+            const char* sp = strchr(hdrStr, ' ');
+            m_ResponseCode = 0;
+            if (sp) {
+                while (*sp == ' ') sp++;
+                while (*sp >= '0' && *sp <= '9') {
+                    m_ResponseCode = m_ResponseCode * 10 + (*sp - '0');
+                    sp++;
+                }
+            }
+
+            if (m_ResponseCode == 301 || m_ResponseCode == 302 ||
+                m_ResponseCode == 303 || m_ResponseCode == 307 || m_ResponseCode == 308) {
+                m_State = STATE_REDIRECT;
+                return DoRedirect();
+            }
+
+            m_Chunked = (strstr(hdrStr, "Transfer-Encoding: chunked") != NULL ||
+                         strstr(hdrStr, "transfer-encoding: chunked") != NULL);
+
+            const char* clStr = FindHeaderValue(hdrStr, "Content-Length");
+            m_ContentLength = -1;
+            if (clStr) {
+                m_ContentLength = atol(clStr);
+            }
+
+            m_ConnectionClose = (strstr(hdrStr, "Connection: close") != NULL ||
+                                 strstr(hdrStr, "connection: close") != NULL);
+
+            m_State = STATE_RECV_BODY;
+            return true;
+        }
+
+        if (m_ResponseHeaders.size() > 32768) {
+            SetError("headers too large");
+            return false;
+        }
+    }
+
+    SetError("connection closed before headers complete");
+    return false;
+}
+
+bool HttpRequest::DoRecvBody() {
+    while (true) {
+        int got;
+        if (m_IsHttps && m_SSL) {
+            SET_AMISSL_BASES(m_AmiSSLBase, m_AmiSSLMasterBase);
+            got = SSL_read((SSL*)m_SSL, m_RecvBuffer.data(), (int)m_RecvBuffer.size());
+            if (got <= 0) {
+                int sslErr = SSL_get_error((SSL*)m_SSL, got);
+                if (sslErr == SSL_ERROR_WANT_READ || sslErr == SSL_ERROR_WANT_WRITE) {
+                    m_SSLWant = sslErr;
+                    return true;
+                }
+                if (sslErr == SSL_ERROR_ZERO_RETURN || sslErr == SSL_ERROR_SYSCALL) {
+                    // Server closed connection — for non-chunked with no Content-Length, this means done
+                    break;
+                }
+                SetError("SSL_read failed during body");
+                return false;
+            }
+        } else {
+            got = recv(m_SocketFd, m_RecvBuffer.data(), (int)m_RecvBuffer.size(), 0);
+            if (got <= 0) {
+                if (got < 0) {
+                    int err = Errno();
+                    if (err == EWOULDBLOCK || err == EAGAIN) {
+                        return true;
+                    }
+                    SetError("recv() failed during body");
+                    return false;
+                }
+                break;
+            }
+        }
+
+        m_ResponseBody.append(m_RecvBuffer.data(), got);
+
+        if (m_Chunked) {
+            if (m_ResponseBody.find("0\r\n\r\n") != std::string::npos) {
+                break;
+            }
+        } else if (m_ContentLength >= 0) {
+            if ((long)m_ResponseBody.size() >= m_ContentLength) {
+                break;
+            }
+        }
+
+        if (m_ResponseBody.size() > 5 * 1024 * 1024) {
+            SetError("response body too large");
+            return false;
+        }
+    }
+
+    CloseSSL();
+    CloseConn();
+
+    m_State = STATE_DONE;
+    return false;
+}
+
+bool HttpRequest::DoRedirect() {
+    const char* hdrStr = m_ResponseHeaders.c_str();
+    const char* loc = FindHeaderValue(hdrStr, "Location");
+    if (!loc) {
+        SetError("redirect without Location header");
+        return false;
+    }
+
+    std::string newUrl;
+    const char* locEnd = loc;
+    while (*locEnd && *locEnd != '\r' && *locEnd != '\n') locEnd++;
+    newUrl.assign(loc, (size_t)(locEnd - loc));
+
+    CloseSSL();
+    CloseConn();
+
+    m_CurrentUrl = newUrl;
+    m_RedirectCount++;
+
+    return Start();
+}
+
+std::string HttpRequest::BuildRequest() {
+    std::string req;
+    req.reserve(4096);
+
+    req += m_Method;
+    req += ' ';
+    req += m_Path;
+    req += " HTTP/1.1\r\n";
+    req += "Host: ";
+    req += m_Host;
+    req += "\r\n";
+    req += "User-Agent: Amidon/0.2\r\n";
+    req += "Accept: */*\r\n";
+    req += "Connection: close\r\n";
+
+    if (!m_AuthHeader.empty()) {
+        req += m_AuthHeader;
+        req += "\r\n";
+    }
+
+    if (m_Method == "POST" && !m_Body.empty()) {
+        const char* ct = m_ContentType.empty() ? "application/json" : m_ContentType.c_str();
+        req += "Content-Type: ";
+        req += ct;
+        req += "\r\n";
+        char lenBuf[32];
+        snprintf(lenBuf, sizeof(lenBuf), "%lu", (unsigned long)m_Body.size());
+        req += "Content-Length: ";
+        req += lenBuf;
+        req += "\r\n";
+    }
+
+    req += "\r\n";
+    return req;
 }

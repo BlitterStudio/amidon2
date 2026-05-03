@@ -95,7 +95,7 @@ void AsyncHttpService::Progress() {
     }
 }
 
-int AsyncHttpService::GetSelectFdSets(fd_set* readfds, fd_set* writefds) const {
+int AsyncHttpService::GetSelectFdSets(void* readfds, void* writefds) const {
     if (!m_CurrentRequest || m_CurrentRequest->IsFinished()) {
         return 0;
     }
@@ -119,6 +119,18 @@ void AsyncHttpService::StartNext() {
 
 void AsyncHttpService::FinishCurrent() {
     if (!m_CurrentRequest) return;
+
+    if (m_CurrentRequest->GetState() == HttpRequest::STATE_DONE) {
+        HttpCallback cb = m_CurrentRequest->GetCallback();
+        if (cb) {
+            cb(m_CurrentRequest->GetResponseBody(), m_CurrentRequest->GetResponseCode());
+        }
+    } else if (m_CurrentRequest->GetState() == HttpRequest::STATE_ERROR) {
+        HttpCallback cb = m_CurrentRequest->GetCallback();
+        if (cb) {
+            cb("", 0);
+        }
+    }
 
     m_CurrentRequest.reset();
     StartNext();
