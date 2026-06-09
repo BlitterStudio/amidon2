@@ -100,10 +100,24 @@ void AsyncHttpService::Progress() {
 }
 
 int AsyncHttpService::GetSelectFdSets(void* readfds, void* writefds) const {
-    if (!m_CurrentRequest || m_CurrentRequest->IsFinished()) {
+    HttpRequest* req = m_CurrentRequest.get();
+    if (!req) return 0;
+
+    // Defensive sanity check: an in-flight HttpRequest should always have
+    // a valid socket fd (>= 0) once Start() has set m_State to CONNECTING.
+    // If we ever see a corrupt-looking value, log it and bail rather than
+    // dereference further into the object — guards against the
+    // GetSelectFdSets-NULL-deref crash pattern observed in the wild.
+    int fd = req->GetSocketFd();
+    if (fd < -1 || fd > 65535) {
+        fprintf(stderr,
+                "DEBUG: AsyncHttp::GetSelectFdSets bogus fd=%d on req=%p — bailing\n",
+                fd, (void*)req);
         return 0;
     }
-    return m_CurrentRequest->GetSelectFdSets(readfds, writefds);
+
+    if (req->IsFinished()) return 0;
+    return req->GetSelectFdSets(readfds, writefds);
 }
 
 void AsyncHttpService::StartNext() {
